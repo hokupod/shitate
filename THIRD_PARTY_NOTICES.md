@@ -5,20 +5,44 @@ external components used to build or run the project.
 
 ## JUCE 9.0.0
 
-**Status: pending until Plan 002.**
-
-JUCE will be included as a git submodule pinned to commit
-`f8f8864172464b9adf9eba6101e1f784838d1597`. Plan 002 must copy the unmodified
-license from that exact checkout to `LICENSES/JUCE-LICENSE.md` and replace this
-pending section with the applicable notice from the pinned source. Do not infer
-or paraphrase legal text before the submodule exists.
+JUCE is included as a git submodule pinned to commit
+`f8f8864172464b9adf9eba6101e1f784838d1597`. The unmodified top-level license
+from that checkout is included at [LICENSES/JUCE-LICENSE.md](LICENSES/JUCE-LICENSE.md).
+The project uses JUCE under its AGPLv3 option. See the pinned source for the
+complete dependency inventory.
 
 ## VST3 SDK
 
-**Status: pending until Plan 002.**
+The following unmodified notice is copied from
+`external/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK/LICENSE.txt`
+at the pinned JUCE commit:
 
-The VST3 SDK used through the pinned JUCE source contains an MIT notice. Plan
-002 must copy the applicable unmodified notice from that exact source here.
+```text
+//-----------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2025, Steinberg Media Technologies GmbH
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+//---------------------------------------------------------------------------------
+```
 
 ## BlackHole 2ch
 

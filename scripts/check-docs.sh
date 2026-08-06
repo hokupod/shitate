@@ -54,7 +54,7 @@ fixed_design_tokens=(
   D-001
   D-024
   AGPL-3.0-only
-  48,000
+  "48,000"
   1024
   README.zh-CN.md
   resumeAfterWake
