@@ -1,0 +1,26 @@
+# Generated builds and dependency outputs
+/build/
+/result
+/result-*
+
+# Xcode user state and generated archives
+*.xcuserstate
+xcuserdata/
+*.dSYM/
+*.xcarchive/
+DerivedData/
+
+# macOS metadata
+.DS_Store
+
+# Signing, notarization, and release artifacts
+/.notarytool/
+/artifacts/
+*.dmg
+*.pkg
+*.tar.zst
+*.sha256
+
+# Local diagnostics
+/diagnostics/
+/logs/
