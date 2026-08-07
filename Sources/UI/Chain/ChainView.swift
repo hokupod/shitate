@@ -111,20 +111,19 @@ struct ChainView: View {
         HStack {
             Menu {
                 let compatible = model.pluginCatalog.document.entries.filter {
-                    $0.compatibility == .compatible
+                    PluginCatalogActionPolicy.primaryAction(
+                        for: $0,
+                        allowAdHocSignedPlugins:
+                            model.settings.pluginPolicy.allowAdHocSignedPlugins,
+                        approvedAdHocFingerprints: model.approvedAdHocFingerprints
+                    ) == .add
                 }
                 if compatible.isEmpty {
                     Text("No compatible VST3 found")
                 } else {
                     ForEach(compatible, id: \.fingerprint) { entry in
-                        if entry.signatureKind == .adHoc {
-                            Button("Approve & Add \(entry.name)…") {
-                                model.approveAdHocPluginAndAdd(entry)
-                            }
-                        } else {
-                            Button(entry.name) {
-                                model.requestAddPlugin(entry)
-                            }
+                        Button(entry.name) {
+                            model.requestAddPlugin(entry)
                         }
                     }
                 }

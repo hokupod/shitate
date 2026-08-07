@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 struct PluginsView: View {
     @Environment(AppModel.self) private var model
     @State private var isFolderImporterPresented = false
+    @State private var pendingAdHocApproval: PluginCatalogEntry?
 
     var body: some View {
         @Bindable var model = model
@@ -34,6 +35,23 @@ struct PluginsView: View {
             if case .success(let urls) = result, let url = urls.first {
                 model.addPluginFolder(url)
             }
+        }
+        .alert(
+            "Approve \(pendingAdHocApproval?.name ?? "Ad-hoc Plug-in")?",
+            isPresented: Binding(
+                get: { pendingAdHocApproval != nil },
+                set: { if !$0 { pendingAdHocApproval = nil } }
+            ),
+            presenting: pendingAdHocApproval
+        ) { entry in
+            Button("Cancel", role: .cancel) {}
+            Button("Approve & Add") {
+                model.approveAdHocPluginAndAdd(entry)
+            }
+        } message: { _ in
+            Text(
+                "This plug-in isn't signed by an identified developer. Shi-tate will approve only its currently scanned fingerprint; any code change requires approval again."
+            )
         }
     }
 
@@ -118,28 +136,31 @@ struct PluginsView: View {
                 .width(min: 90, ideal: 110)
                 TableColumn("Action") { entry in
                     HStack {
-                        if entry.compatibility == .compatible {
-                            if entry.signatureKind == .adHoc {
-                                Button("Approve & Add…") {
-                                    model.approveAdHocPluginAndAdd(entry)
-                                }
-                                .disabled(
-                                    !model.settings.pluginPolicy.allowAdHocSignedPlugins
-                                        || !model.canAddPlugin
-                                )
-                            } else {
-                                Button("Add") {
-                                    model.requestAddPlugin(entry)
-                                }
-                                .disabled(!model.canAddPlugin)
+                        switch primaryAction(for: entry) {
+                        case .add:
+                            Button("Add") {
+                                model.requestAddPlugin(entry)
                             }
+                            .disabled(!model.canAddPlugin)
+                        case .approve:
+                            Button("Approve & Add…") {
+                                pendingAdHocApproval = entry
+                            }
+                            .disabled(!model.canAddPlugin)
+                        case .reviewSettings:
+                            SettingsLink {
+                                Text("Settings…")
+                            }
+                            .help("Enable explicit ad-hoc approval in Plug-ins settings.")
+                        case .none:
+                            EmptyView()
                         }
                         Button("Rescan") {
                             model.rescanPlugin(entry)
                         }
                     }
                 }
-                .width(min: 120, ideal: 170)
+                .width(min: 150, ideal: 220)
             }
             .frame(minHeight: 280)
             .accessibilityLabel("Detected VST3 plug-ins")
@@ -180,6 +201,14 @@ struct PluginsView: View {
         default:
             false
         }
+    }
+
+    private func primaryAction(for entry: PluginCatalogEntry) -> PluginCatalogPrimaryAction {
+        PluginCatalogActionPolicy.primaryAction(
+            for: entry,
+            allowAdHocSignedPlugins: model.settings.pluginPolicy.allowAdHocSignedPlugins,
+            approvedAdHocFingerprints: model.approvedAdHocFingerprints
+        )
     }
 
     private var scanStatusText: String {

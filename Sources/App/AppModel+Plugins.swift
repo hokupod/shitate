@@ -103,16 +103,45 @@ extension AppModel {
     }
 
     func approveAdHocPluginAndAdd(_ entry: PluginCatalogEntry) {
-        guard
-            canAddPlugin,
-            settings.pluginPolicy.allowAdHocSignedPlugins,
-            entry.signatureKind == .adHoc
-        else {
-            lastError = "Ad-hoc signed plug-ins are disabled in Settings."
+        guard canAddPlugin else {
             return
         }
-        approvedAdHocFingerprints.insert(entry.fingerprint)
-        requestAudioOperation(.addPlugin(entry.fingerprint))
+        guard
+            PluginCatalogActionPolicy.primaryAction(
+                for: entry,
+                allowAdHocSignedPlugins: settings.pluginPolicy.allowAdHocSignedPlugins,
+                approvedAdHocFingerprints: approvedAdHocFingerprints
+            ) == .approve
+        else {
+            pluginCatalogError =
+                "This plug-in is not eligible for explicit ad-hoc fingerprint approval."
+            return
+        }
+
+        do {
+            let replacements = try pluginCatalog.rescanBundle(
+                at: entry.bundlePath,
+                approvedAdHocFingerprints: [entry.fingerprint]
+            )
+            guard
+                PluginApprovalAuthority.explicitlyApprovedEntry(
+                    fingerprint: entry.fingerprint,
+                    in: replacements
+                ) != nil
+            else {
+                approvedAdHocFingerprints.remove(entry.fingerprint)
+                pluginCatalogError =
+                    "\(entry.name) changed or failed validation during approval. Review the rescanned entry before trying again."
+                return
+            }
+            approvedAdHocFingerprints.insert(entry.fingerprint)
+            pluginCatalogError = nil
+            requestAudioOperation(.addPlugin(entry.fingerprint))
+        } catch {
+            approvedAdHocFingerprints.remove(entry.fingerprint)
+            pluginCatalogError =
+                "\(entry.name) could not be approved safely. Rescan it before trying again."
+        }
     }
 
     func requestRemovePlugin(_ slotID: UUID) {

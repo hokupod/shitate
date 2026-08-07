@@ -127,7 +127,6 @@ final class ProductModelTests: XCTestCase {
             signatureKind: .developerID,
             compatibility: .compatible
         )
-
         XCTAssertEqual(
             PluginApprovalAuthority.approvedAdHocFingerprints(
                 allowAdHocSignedPlugins: true,
@@ -141,6 +140,112 @@ final class ProductModelTests: XCTestCase {
                 entries: [approved]
             ),
             []
+        )
+
+        XCTAssertEqual(
+            PluginApprovalAuthority.explicitlyApprovedEntry(
+                fingerprint: approved.fingerprint,
+                in: [blocked, developerID, approved]
+            ),
+            approved
+        )
+        XCTAssertNil(
+            PluginApprovalAuthority.explicitlyApprovedEntry(
+                fingerprint: blocked.fingerprint,
+                in: [blocked]
+            )
+        )
+        XCTAssertNil(
+            PluginApprovalAuthority.explicitlyApprovedEntry(
+                fingerprint: developerID.fingerprint,
+                in: [developerID]
+            )
+        )
+        XCTAssertNil(
+            PluginApprovalAuthority.explicitlyApprovedEntry(
+                fingerprint: "replaced-fingerprint",
+                in: [approved]
+            )
+        )
+    }
+
+    func testPluginActionsKeepAdHocApprovalExplicitAndFailClosed() {
+        let blocked = catalogEntry(
+            fingerprint: "blocked",
+            signatureKind: .adHoc,
+            compatibility: .blocked
+        )
+        let approved = catalogEntry(
+            fingerprint: "approved",
+            signatureKind: .adHoc,
+            compatibility: .compatible
+        )
+        let developerID = catalogEntry(
+            fingerprint: "developer",
+            signatureKind: .developerID,
+            compatibility: .compatible
+        )
+        let apple = catalogEntry(
+            fingerprint: "apple",
+            signatureKind: .apple,
+            compatibility: .compatible
+        )
+
+        XCTAssertEqual(
+            PluginCatalogActionPolicy.primaryAction(
+                for: blocked,
+                allowAdHocSignedPlugins: false,
+                approvedAdHocFingerprints: []
+            ),
+            .reviewSettings
+        )
+        XCTAssertEqual(
+            PluginCatalogActionPolicy.primaryAction(
+                for: blocked,
+                allowAdHocSignedPlugins: true,
+                approvedAdHocFingerprints: []
+            ),
+            .approve
+        )
+        XCTAssertEqual(
+            PluginCatalogActionPolicy.primaryAction(
+                for: approved,
+                allowAdHocSignedPlugins: true,
+                approvedAdHocFingerprints: [approved.fingerprint]
+            ),
+            .add
+        )
+        XCTAssertEqual(
+            PluginCatalogActionPolicy.primaryAction(
+                for: approved,
+                allowAdHocSignedPlugins: true,
+                approvedAdHocFingerprints: []
+            ),
+            .approve
+        )
+        XCTAssertEqual(
+            PluginCatalogActionPolicy.primaryAction(
+                for: approved,
+                allowAdHocSignedPlugins: false,
+                approvedAdHocFingerprints: [approved.fingerprint]
+            ),
+            .reviewSettings
+        )
+        XCTAssertEqual(
+            PluginCatalogActionPolicy.primaryAction(
+                for: developerID,
+                allowAdHocSignedPlugins: false,
+                approvedAdHocFingerprints: []
+            ),
+            .add
+        )
+        XCTAssertEqual(
+            PluginCatalogActionPolicy.primaryAction(
+                for: apple,
+                allowAdHocSignedPlugins: false,
+                approvedAdHocFingerprints: []
+            ),
+            .add
         )
     }
 
@@ -269,7 +374,8 @@ final class ProductModelTests: XCTestCase {
             latencySamples: 0,
             hasEditor: false,
             compatibility: compatibility,
-            reason: compatibility == .compatible ? nil : "approvalRequired",
+            reason: compatibility == .compatible
+                ? nil : PluginCatalogEntry.adHocApprovalRequiredReason,
             bundleModificationTime: 1,
             scannerProtocol: 1,
             compatibleAppVersion: "0.1",

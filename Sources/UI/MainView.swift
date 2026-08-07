@@ -22,7 +22,7 @@ struct MainView: View {
         } detail: {
             selectedView
         }
-        .frame(minWidth: 860, minHeight: 600)
+        .frame(minWidth: 1180, minHeight: 600)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {

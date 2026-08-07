@@ -18,6 +18,8 @@ enum PluginCatalogCompatibility: String, Codable, Sendable {
 }
 
 struct PluginCatalogEntry: Codable, Equatable, Identifiable, Sendable {
+    static let adHocApprovalRequiredReason = "adHocApprovalRequired"
+
     let fingerprint: String
     let bundlePath: String
     let classUID: String
@@ -40,6 +42,12 @@ struct PluginCatalogEntry: Codable, Equatable, Identifiable, Sendable {
     let lastScannedAt: String
 
     var id: String { fingerprint }
+
+    var requiresExplicitAdHocApproval: Bool {
+        signatureKind == .adHoc
+            && compatibility == .blocked
+            && reason == Self.adHocApprovalRequiredReason
+    }
 }
 
 struct PluginCatalogDocument: Codable, Equatable, Sendable {

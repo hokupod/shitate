@@ -257,6 +257,48 @@ enum PluginApprovalAuthority {
                 .map(\.fingerprint)
         )
     }
+
+    static func explicitlyApprovedEntry(
+        fingerprint: String,
+        in entries: [PluginCatalogEntry]
+    ) -> PluginCatalogEntry? {
+        entries.first {
+            $0.fingerprint == fingerprint
+                && $0.signatureKind == .adHoc
+                && $0.compatibility == .compatible
+        }
+    }
+}
+
+enum PluginCatalogPrimaryAction: Equatable {
+    case add
+    case approve
+    case reviewSettings
+    case none
+}
+
+enum PluginCatalogActionPolicy {
+    static func primaryAction(
+        for entry: PluginCatalogEntry,
+        allowAdHocSignedPlugins: Bool,
+        approvedAdHocFingerprints: Set<String>
+    ) -> PluginCatalogPrimaryAction {
+        switch entry.signatureKind {
+        case .adHoc:
+            if entry.requiresExplicitAdHocApproval {
+                return allowAdHocSignedPlugins ? .approve : .reviewSettings
+            }
+            guard entry.compatibility == .compatible else {
+                return .none
+            }
+            guard allowAdHocSignedPlugins else {
+                return .reviewSettings
+            }
+            return approvedAdHocFingerprints.contains(entry.fingerprint) ? .add : .approve
+        case .apple, .developerID:
+            return entry.compatibility == .compatible ? .add : .none
+        }
+    }
 }
 
 enum SessionRecoveryPlanner {
