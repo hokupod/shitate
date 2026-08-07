@@ -6,5 +6,6 @@
 NS_ASSUME_NONNULL_BEGIN
 
 NSError* STMakeBridgeError(NSInteger code, NSString* message);
+NSError* STMakeAudioBridgeError(NSInteger code, NSString* technicalDetail);
 
 NS_ASSUME_NONNULL_END

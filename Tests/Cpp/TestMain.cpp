@@ -3,11 +3,20 @@
 
 #include <iostream>
 #include <juce_core/juce_core.h>
+#include <string_view>
 
-int main() {
+int main(int argc, char* argv[]) {
     juce::UnitTestRunner runner;
     runner.setAssertOnFailure(false);
-    runner.runTestsInCategory("Shitate", 0x53484954);
+
+    if (argc == 3 && std::string_view(argv[1]) == "--test") {
+        runner.runTestsWithName(argv[2], 0x53484954);
+    } else if (argc == 1) {
+        runner.runTestsInCategory("Shitate", 0x53484954);
+    } else {
+        std::cerr << "usage: ShitateCppTests [--test <name>]\n";
+        return 2;
+    }
 
     if (runner.getNumResults() == 0) {
         std::cerr << "no Shitate JUCE unit tests were registered\n";

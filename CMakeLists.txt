@@ -40,8 +40,30 @@ add_subdirectory(external/JUCE)
 
 add_library(ShitateCore STATIC
   Sources/Core/ApplicationCore.cpp
-  Sources/Core/ApplicationCore.h)
-target_include_directories(ShitateCore PUBLIC Sources/Core)
+  Sources/Core/ApplicationCore.h
+  Sources/Core/Audio/AudioBridgeController.cpp
+  Sources/Core/Audio/AudioBridgeController.h
+  Sources/Core/Audio/AudioEngine.cpp
+  Sources/Core/Audio/AudioEngine.h
+  Sources/Core/Audio/AudioTypes.h
+  Sources/Core/Audio/DeviceService.cpp
+  Sources/Core/Audio/DeviceService.h
+  Sources/Core/Audio/InputMapper.cpp
+  Sources/Core/Audio/InputMapper.h
+  Sources/Core/Audio/MasterOutputStage.cpp
+  Sources/Core/Audio/MasterOutputStage.h
+  Sources/Core/Audio/MeterAccumulator.cpp
+  Sources/Core/Audio/MeterAccumulator.h
+  Sources/Core/Audio/OutputSafetyProcessor.cpp
+  Sources/Core/Audio/OutputSafetyProcessor.h
+  Sources/Core/Audio/RealtimeEventQueue.cpp
+  Sources/Core/Audio/RealtimeEventQueue.h
+  Sources/Core/Audio/RealtimeSafety.h)
+target_include_directories(ShitateCore PUBLIC
+  Sources/Core
+  external/JUCE/modules)
+target_link_libraries(ShitateCore PRIVATE
+  juce::juce_audio_devices)
 target_compile_definitions(ShitateCore PRIVATE
   SHITATE_DISPLAY_VERSION="${SHITATE_DISPLAY_VERSION}")
 shitate_apply_juce_definitions(ShitateCore)
@@ -53,7 +75,8 @@ add_library(ShitateBridge STATIC
   Sources/Bridge/Public/STModels.h
   Sources/Bridge/STAudioEngineBridge.mm
   Sources/Bridge/STErrorMapper.h
-  Sources/Bridge/STErrorMapper.mm)
+  Sources/Bridge/STErrorMapper.mm
+  Sources/Bridge/STModels.mm)
 target_include_directories(ShitateBridge PUBLIC Sources/Bridge/Public)
 target_include_directories(ShitateBridge PRIVATE Sources/Bridge Sources/Core)
 target_link_libraries(ShitateBridge PUBLIC ShitateCore "-framework Foundation")
@@ -66,8 +89,18 @@ configure_file(resources/Scanner-Info.plist.in resources/Scanner-Info.plist @ONL
 
 add_executable(Shitate MACOSX_BUNDLE
   Sources/App/AppDelegate.swift
-  Sources/App/ShitateApp.swift)
-target_link_libraries(Shitate PRIVATE ShitateBridge "-framework AppKit" "-framework SwiftUI")
+  Sources/App/ApplicationState.swift
+  Sources/App/AppModel.swift
+  Sources/App/AudioDevice.swift
+  Sources/App/ShitateApp.swift
+  Sources/Services/MicrophonePermissionService.swift
+  Sources/Services/WorkspaceEventService.swift
+  Sources/UI/AudioRoutingView.swift)
+target_link_libraries(Shitate PRIVATE
+  ShitateBridge
+  "-framework AppKit"
+  "-framework AVFoundation"
+  "-framework SwiftUI")
 set_target_properties(Shitate PROPERTIES
   OUTPUT_NAME "Shi-tate"
   MACOSX_BUNDLE_BUNDLE_NAME "Shi-tate"
@@ -101,15 +134,37 @@ if(BUILD_TESTING)
 
   add_executable(ShitateCppTests
     Tests/Cpp/TestMain.cpp
-    Tests/Cpp/CoreVersionTest.cpp)
+    Tests/Cpp/AudioEngineTest.cpp
+    Tests/Cpp/AudioPrimitivesTest.cpp
+    Tests/Cpp/CoreVersionTest.cpp
+    Tests/Cpp/DeviceServiceTest.cpp
+    Tests/Cpp/RealtimeEventQueueTest.cpp
+    Tests/Cpp/TestAllocationTracker.cpp
+    Tests/Cpp/TestAllocationTracker.h)
   target_link_libraries(ShitateCppTests PRIVATE ShitateCore juce::juce_core)
   target_compile_definitions(ShitateCppTests PRIVATE JUCE_UNIT_TESTS=1)
   shitate_apply_juce_definitions(ShitateCppTests)
   shitate_enable_warnings(ShitateCppTests)
 
+  add_executable(ShitateAudioHardwareTest
+    Tests/Integration/AudioHardwareIntegrationTest.cpp)
+  target_link_libraries(ShitateAudioHardwareTest PRIVATE ShitateCore)
+  shitate_enable_warnings(ShitateAudioHardwareTest)
+
   xctest_add_bundle(ShitateSwiftTests Shitate
-    Tests/Swift/BridgeVersionTests.swift)
-  target_link_libraries(ShitateSwiftTests PRIVATE ShitateBridge)
+    Sources/App/ApplicationState.swift
+    Sources/App/AudioDevice.swift
+    Sources/Services/MicrophonePermissionService.swift
+    Sources/Services/WorkspaceEventService.swift
+    Tests/Swift/ApplicationStateTests.swift
+    Tests/Swift/AudioEnvironmentTests.swift
+    Tests/Swift/BridgeVersionTests.swift
+    Tests/Swift/MicrophonePermissionTests.swift
+    Tests/Swift/WorkspaceEventServiceTests.swift)
+  target_link_libraries(ShitateSwiftTests PRIVATE
+    ShitateBridge
+    "-framework AppKit"
+    "-framework AVFoundation")
   target_link_options(ShitateSwiftTests PRIVATE
     "LINKER:-force_load,$<TARGET_FILE:ShitateBridge>"
     "LINKER:-force_load,$<TARGET_FILE:ShitateCore>")
@@ -119,11 +174,27 @@ if(BUILD_TESTING)
     XCODE_ATTRIBUTE_SWIFT_STRICT_CONCURRENCY "complete"
     XCODE_ATTRIBUTE_SWIFT_VERSION "6.0")
 
-  add_test(NAME CoreVersionTest COMMAND ShitateCppTests)
+  add_test(NAME CoreVersionTest COMMAND ShitateCppTests --test "Core display version")
   set_tests_properties(CoreVersionTest PROPERTIES LABELS "unit;cpp")
 
+  foreach(audio_test IN ITEMS InputMapper Meter OutputSafety MasterOutput RealtimeEventQueue)
+    add_test(NAME ${audio_test}Test COMMAND ShitateCppTests --test ${audio_test})
+    set_tests_properties(${audio_test}Test PROPERTIES LABELS "unit;cpp;audio-unit")
+  endforeach()
+
+  add_test(NAME DeviceServiceTest COMMAND ShitateCppTests --test DeviceService)
+  set_tests_properties(DeviceServiceTest PROPERTIES LABELS "unit;cpp;audio-unit")
+
+  add_test(NAME AudioEngineTest COMMAND ShitateCppTests --test AudioEngine)
+  set_tests_properties(AudioEngineTest PROPERTIES LABELS "unit;cpp;audio-unit;audio-integration")
+
   xctest_add_test(BridgeVersionTest ShitateSwiftTests)
-  set_tests_properties(BridgeVersionTest PROPERTIES LABELS "unit;swift")
+  set_tests_properties(BridgeVersionTest PROPERTIES LABELS "unit;swift;audio-unit")
+
+  add_test(NAME AudioHardwareIntegrationTest COMMAND ShitateAudioHardwareTest)
+  set_tests_properties(AudioHardwareIntegrationTest PROPERTIES
+    LABELS "audio-integration;hardware"
+    SKIP_RETURN_CODE 77)
 
   add_test(NAME ScannerArgumentsTest
     COMMAND "${CMAKE_SOURCE_DIR}/Tests/Integration/ScannerArgumentsTest.sh"

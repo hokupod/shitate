@@ -1,0 +1,82 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Hokuto Takemiya
+
+#import "Public/STModels.h"
+
+@implementation STAudioDeviceInfo
+
+- (instancetype)initWithUID:(NSString*)uid
+                displayName:(NSString*)displayName
+          inputChannelNames:(NSArray<NSString*>*)inputChannelNames
+         outputChannelNames:(NSArray<NSString*>*)outputChannelNames
+                sampleRates:(NSArray<NSNumber*>*)sampleRates
+        allowedBufferFrames:(NSArray<NSNumber*>*)allowedBufferFrames
+        minimumBufferFrames:(NSInteger)minimumBufferFrames
+        maximumBufferFrames:(NSInteger)maximumBufferFrames
+                      alive:(BOOL)alive
+                  aggregate:(BOOL)aggregate {
+    self = [super init];
+    if (self != nil) {
+        _uid = [uid copy];
+        _displayName = [displayName copy];
+        _inputChannelNames = [inputChannelNames copy];
+        _outputChannelNames = [outputChannelNames copy];
+        _sampleRates = [sampleRates copy];
+        _allowedBufferFrames = [allowedBufferFrames copy];
+        _minimumBufferFrames = minimumBufferFrames;
+        _maximumBufferFrames = maximumBufferFrames;
+        _alive = alive;
+        _aggregate = aggregate;
+    }
+    return self;
+}
+
+@end
+
+@implementation STMeterSnapshot
+
+- (instancetype)initWithInputPeakDb:(float)inputPeakDb
+                         inputRmsDb:(float)inputRmsDb
+                       outputPeakDb:(float)outputPeakDb
+                        outputRmsDb:(float)outputRmsDb
+                      inputClipping:(BOOL)inputClipping
+                     outputClipping:(BOOL)outputClipping
+                 inputSignalPresent:(BOOL)inputSignalPresent
+                outputSignalPresent:(BOOL)outputSignalPresent {
+    self = [super init];
+    if (self != nil) {
+        _inputPeakDb = inputPeakDb;
+        _inputRmsDb = inputRmsDb;
+        _outputPeakDb = outputPeakDb;
+        _outputRmsDb = outputRmsDb;
+        _inputClipping = inputClipping;
+        _outputClipping = outputClipping;
+        _inputSignalPresent = inputSignalPresent;
+        _outputSignalPresent = outputSignalPresent;
+    }
+    return self;
+}
+
+@end
+
+@implementation STEngineDiagnostics
+
+- (instancetype)initWithSampleRate:(double)sampleRate
+                      bufferFrames:(NSInteger)bufferFrames
+               inputLatencySamples:(NSInteger)inputLatencySamples
+              outputLatencySamples:(NSInteger)outputLatencySamples
+                         xrunCount:(NSInteger)xrunCount
+       callbackTimeEmaMicroseconds:(double)callbackTimeEmaMicroseconds {
+    self = [super init];
+    if (self != nil) {
+        _sampleRate = sampleRate;
+        _bufferFrames = bufferFrames;
+        _inputLatencySamples = inputLatencySamples;
+        _outputLatencySamples = outputLatencySamples;
+        _xrunCount = xrunCount;
+        _callbackTimeEmaMicroseconds = callbackTimeEmaMicroseconds;
+    }
+    return self;
+}
+
+@end
