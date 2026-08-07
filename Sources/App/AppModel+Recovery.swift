@@ -92,6 +92,8 @@ extension AppModel {
         if isRoutingActive {
             bridge.stop()
         }
+        configuredOutputTarget = nil
+        cancelPreviewSession()
         isMuted = false
         state = .safeMode(reason)
         localLogService.log("safeModeEntered", fields: ["reason": "\(reason)"])
@@ -123,6 +125,8 @@ extension AppModel {
         } catch {
             bridge.setMasterMuted(true)
             bridge.stop()
+            configuredOutputTarget = nil
+            cancelPreviewSession()
             persistenceBlocksRouting = true
             lastError = error.localizedDescription
             state = .safeMode(.runStateWriteFailed)
@@ -173,6 +177,8 @@ extension AppModel {
         } catch {
             bridge.setMasterMuted(true)
             bridge.stop()
+            configuredOutputTarget = nil
+            cancelPreviewSession()
             persistenceBlocksRouting = true
             lastError = error.localizedDescription
             state = .safeMode(.runStateWriteFailed)
@@ -344,6 +350,8 @@ extension AppModel {
         resumeAfterOperation = false
         bridge.setMasterMuted(true)
         bridge.stop()
+        configuredOutputTarget = nil
+        cancelPreviewSession()
         isMuted = false
         lastError = message
         apply(event)

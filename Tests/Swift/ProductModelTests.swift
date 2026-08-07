@@ -44,6 +44,108 @@ final class ProductModelTests: XCTestCase {
         }
     }
 
+    func testPreviewFromStoppedStartsWithoutAStoredRouteToResume() throws {
+        let output = PreviewOutput(uid: "speaker", name: "MacBook Pro Speakers")
+        let switching = try XCTUnwrap(
+            PreviewSessionState.begin(from: .readyStopped, isMuted: false, output: output)
+        )
+
+        XCTAssertEqual(
+            switching.returnContext,
+            PreviewReturnContext(wasRouting: false, wasMuted: false)
+        )
+        XCTAssertEqual(switching.output, output)
+        XCTAssertTrue(switching.isTransitioning)
+        XCTAssertEqual(switching.markActive()?.isActive, true)
+    }
+
+    func testPreviewFromMutedRoutingPreservesExactReturnContext() throws {
+        let output = PreviewOutput(uid: "headphones", name: "USB Headphones")
+        let switching = try XCTUnwrap(
+            PreviewSessionState.begin(from: .muted, isMuted: true, output: output)
+        )
+        let active = try XCTUnwrap(switching.markActive())
+        let returning = try XCTUnwrap(active.beginReturn())
+
+        XCTAssertEqual(
+            returning.returnContext,
+            PreviewReturnContext(wasRouting: true, wasMuted: true)
+        )
+        XCTAssertEqual(returning.output, output)
+        XCTAssertTrue(returning.isTransitioning)
+    }
+
+    func testPreviewFromRunningRoutingRestoresAnUnmutedStart() throws {
+        let output = PreviewOutput(uid: "speaker", name: "Built-in Speakers")
+        let switching = try XCTUnwrap(
+            PreviewSessionState.begin(from: .running, isMuted: false, output: output)
+        )
+        let returning = try XCTUnwrap(switching.markActive()?.beginReturn())
+
+        XCTAssertEqual(
+            returning.returnContext,
+            PreviewReturnContext(wasRouting: true, wasMuted: false)
+        )
+    }
+
+    func testSuccessfulAudioOperationPreparesTheSamePreviewForRestart() throws {
+        let output = PreviewOutput(uid: "headphones", name: "USB Headphones")
+        let switching = try XCTUnwrap(
+            PreviewSessionState.begin(from: .muted, isMuted: true, output: output)
+        )
+        let active = try XCTUnwrap(switching.markActive())
+        let restarting = try XCTUnwrap(active.prepareRestart())
+
+        XCTAssertEqual(restarting, switching)
+        XCTAssertEqual(restarting.output, output)
+        XCTAssertEqual(
+            restarting.returnContext,
+            PreviewReturnContext(wasRouting: true, wasMuted: true)
+        )
+        XCTAssertTrue(restarting.isTransitioning)
+    }
+
+    func testPreviewFailuresDiscardReturnContextAtEveryPhase() throws {
+        let output = PreviewOutput(uid: "speaker", name: "Speakers")
+        let switching = try XCTUnwrap(
+            PreviewSessionState.begin(from: .running, isMuted: false, output: output)
+        )
+        let active = try XCTUnwrap(switching.markActive())
+        let returning = try XCTUnwrap(active.beginReturn())
+
+        for phase in [switching, active, returning] {
+            let stopped = phase.failClosed()
+            XCTAssertEqual(stopped, .inactive)
+            XCTAssertNil(stopped.returnContext)
+            XCTAssertNil(stopped.output)
+        }
+    }
+
+    func testPreviewRejectsTransientAndBlockedApplicationStates() {
+        let output = PreviewOutput(uid: "speaker", name: "Speakers")
+        for state in [
+            ApplicationState.starting,
+            .stopping,
+            .blocked(.engineStartFailed),
+            .safeMode(.previousRunUnclean),
+        ] {
+            XCTAssertNil(PreviewSessionState.begin(from: state, isMuted: false, output: output))
+        }
+    }
+
+    func testPreviewPresentationNamesTheRealOutput() throws {
+        let output = PreviewOutput(uid: "speaker", name: "Studio Display")
+        let switching = try XCTUnwrap(
+            PreviewSessionState.begin(from: .running, isMuted: false, output: output)
+        )
+        let active = try XCTUnwrap(switching.markActive())
+        let presentation = ApplicationStatePresentation(state: .running, previewSession: active)
+
+        XCTAssertEqual(presentation.title, "Previewing")
+        XCTAssertTrue(presentation.detail.contains("Studio Display"))
+        XCTAssertFalse(presentation.outputIsStopped)
+    }
+
     func testOnboardingBranchesForMissingRequirements() {
         let missing = OnboardingReadiness(
             hasBlackHole: false,

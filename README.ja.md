@@ -14,18 +14,20 @@ Shi-tateは、通話へ届く前のマイク信号を自分向けに仕立てま
 ## ステータス
 
 > [!WARNING]
-> **プレアルファ — まだ本番利用できません。** 現在は`0.1.0-dev`を実装中です。
+> **プレアルファ — まだ本番利用できません。** 現在は`0.2.0-dev`を実装中です。
 > インストール可能なreleaseと、第三者VST3への広範な互換性実績はありません。
 
 対応する自動・手動検証結果が公開されるまでは、通話、録音、本番ワークフローへ
 依存しないでください。
 
-## v0.1の範囲
+## v0.2の範囲
 
 - Apple Silicon（`arm64`）とmacOS 14以降。
 - 物理マイク1チャンネルを選び、ステレオdual monoへ変換。
 - 利用者が用意したarm64 VST3 Audio Effectを最大8個直列処理。
-- 外部インストール済みBlackHole 2chへ48 kHzでのみ出力。
+- 外部インストール済みBlackHole 2chへ48 kHzで出力。
+- 明示操作時だけ、BlackHoleとの排他Previewとして加工音を現在のmacOS物理
+  メイン出力へ送る。
 - VST3を1 bundleずつHelper processで隔離スキャン。
 - 保存済みデバイス、形式、プラグインが無効なら無音でfail closed。
 - dirty shutdown後はVST3ロード前にsafe mode起動。
@@ -33,17 +35,18 @@ Shi-tateは、通話へ届く前のマイク信号を自分向けに仕立てま
 
 ## 非対象
 
-v0.1には、独自仮想driver、BlackHole/VST3同梱、Intel/Windows/Linux、
-AU/CLAP/VST2、resampling、sidechain、instrument、monitoring、recording、
-telemetry、updater、runtime plugin isolationを含めません。
+v0.2には、独自仮想driver、BlackHole/VST3同梱、Intel/Windows/Linux、
+AU/CLAP/VST2、resampling、sidechain、instrument、BlackHoleとメイン出力の
+同時monitoring、Preview出力選択・音量、recording、telemetry、updater、
+runtime plugin isolationを含めません。
 
 ## アーキテクチャ
 
 ```text
 物理マイク
   → Shi-tate（直列VST3 Audio Effects）
-  → BlackHole 2ch
-  → Zoom / Slack / Google Meet / Discord
+  ├→ BlackHole 2ch → Zoom / Slack / Google Meet / Discord
+  └→ 現在のmacOSメイン出力（排他Preview）
 ```
 
 SwiftUIが製品UIとローカル状態を担当します。薄いObjective-C++ bridgeが
@@ -103,6 +106,13 @@ plugin 0個のchainも有効なpassthrough設定です。Shi-tateがBlackHoleや
 routingを開始します。`Control-Shift-M`はAccessibility権限なしでmaster muteを
 切り替えます。main windowを閉じてもmenu bar utilityは動作し、Quitで終了します。
 
+`Start Preview`はBlackHole routingを一度停止し、加工済みdual monoを現在の
+macOS物理メイン出力へ送ります。Automatic routing、48 kHz、共有可能な
+128/256/512 frames、live stereo出力でのみ利用できます。ハウリング防止のため
+headphoneを使うかspeaker音量を下げてください。明示的な`Stop Preview`では、
+開始前にrouting中だった場合だけ元のmute状態でBlackHoleを再開します。出力変更、
+sleep、権限喪失、error時はPreviewを停止し、自動再開しません。
+
 hardware・製品導線ごとの検証済み／未検証evidenceは
 [Manual audio QA](docs/manual-qa.md)を参照してください。
 
@@ -112,28 +122,29 @@ hardware・製品導線ごとの検証済み／未検証evidenceは
 隣接するchecksumを取得し、開く前に検証してください。
 
 ```bash
-shasum -a 256 -c Shi-tate_0.1.0_arm64.dmg.sha256
+shasum -a 256 -c Shi-tate_0.2.0_arm64.dmg.sha256
 spctl --assess --type open --context context:primary-signature --verbose=4 \
-  Shi-tate_0.1.0_arm64.dmg
+  Shi-tate_0.2.0_arm64.dmg
 ```
 
 Applicationsへdrag後、
 `spctl --assess --type execute --verbose=4 /Applications/Shi-tate.app`でも
 再検証します。いずれかが失敗した場合はGatekeeperを迂回しないでください。
-releaseにはrecursive `shitate-0.1.0-source.tar.zst`とSHA-256も含まれます。
+releaseにはrecursive `shitate-0.2.0-source.tar.zst`とSHA-256も含まれます。
 GitHubの自動source archiveはJUCE内容を欠くため、対応sourceではありません。
 
 ## プライバシーとセキュリティ
 
 Shi-tateは音声保存、telemetry、crash upload、analytics、remote configuration、
 plugin download、アプリ本体の外部通信を実装しません。shellや管理者権限も要求
-しません。デバイス障害時に別入力やspeakerへ暗黙切替しません。
+しません。デバイス障害時に別入力や出力へ暗黙切替しません。メイン出力Previewは
+利用者の明示操作でのみ開始し、その出力が変わると停止します。
 
 local非同期logはowner-onlyで、5 MiBと3世代rotationに制限し、home pathと
 device UIDをredactします。`Copy Diagnostics`は明示的なclipboard操作であり、
 reportを送信または自動保存しません。
 
-VST3は未信頼のnative codeです。scanは隔離しますが、v0.1のruntime pluginは
+VST3は未信頼のnative codeです。scanは隔離しますが、v0.2のruntime pluginは
 main app内で実行され、利用者権限でcrash、hang、file access、network accessを
 起こし得ます。user VST3対応のためApp Sandboxを無効にし、app/scannerでは
 Library Validationも無効にしています。Hardened Runtimeはpluginを隔離しません。

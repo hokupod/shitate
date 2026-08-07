@@ -47,7 +47,8 @@ class CallbackScope final {
 
 AudioEngine::AudioEngine(DeviceService& deviceService, RealtimeEventQueue& eventQueue,
                          PluginChain* pluginChain) noexcept
-    : deviceService_(&deviceService), eventQueue_(eventQueue), pluginChain_(pluginChain) {}
+    : deviceService_(&deviceService), eventQueue_(eventQueue), pluginChain_(pluginChain),
+      callbackState_(&deviceService.callbackCommitState()) {}
 
 #ifndef NDEBUG
 AudioEngine::AudioEngine(RealtimeEventQueue& eventQueue, PluginChain* pluginChain) noexcept
@@ -265,7 +266,10 @@ void AudioEngine::audioDeviceStopped() {
     if (running_.exchange(false, std::memory_order_acq_rel)) {
         configured_.store(false, std::memory_order_release);
         setStatus(EngineStatus::blocked);
-        requestRecovery(AudioErrorCode::engineStartFailed);
+        const auto invalidation =
+            deviceService_ != nullptr ? deviceService_->invalidationError() : AudioErrorCode::none;
+        requestRecovery(invalidation == AudioErrorCode::none ? AudioErrorCode::engineStartFailed
+                                                             : invalidation);
     }
 }
 
@@ -281,7 +285,10 @@ void AudioEngine::audioDeviceError(const juce::String& message) {
         deviceService_->invalidateFromCallback();
     }
     setStatus(EngineStatus::blocked);
-    requestRecovery(AudioErrorCode::engineStartFailed);
+    const auto invalidation =
+        deviceService_ != nullptr ? deviceService_->invalidationError() : AudioErrorCode::none;
+    requestRecovery(invalidation == AudioErrorCode::none ? AudioErrorCode::engineStartFailed
+                                                         : invalidation);
 }
 
 void AudioEngine::audioDeviceIOCallbackWithContext(
@@ -293,13 +300,13 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     clearOutputs(outputChannelData, numOutputChannels, framesToClear);
 
     auto expectedState = AudioCallbackState::idle;
-    if (!callbackState_.compare_exchange_strong(expectedState, AudioCallbackState::active,
-                                                std::memory_order_acq_rel)) {
+    if (!callbackState_->compare_exchange_strong(expectedState, AudioCallbackState::active,
+                                                 std::memory_order_acq_rel)) {
         callbackInvariantViolation_.store(true, std::memory_order_release);
         requestRecovery(AudioErrorCode::callbackLayoutInvalid);
         return;
     }
-    CallbackScope callbackScope(callbackState_);
+    CallbackScope callbackScope(*callbackState_);
     const auto outputGeneration = outputGeneration_.load(std::memory_order_acquire);
 
     if (!isRunning() || !outputPermitted_.load(std::memory_order_acquire)) {
@@ -308,8 +315,15 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     if (numSamples == 0) {
         return;
     }
-    if (numSamples < 0 || numSamples > maximumCallbackFrames || !configurationIsValid()) {
+    if (numSamples < 0 || numSamples > maximumCallbackFrames) {
         requestRecovery(AudioErrorCode::callbackLayoutInvalid);
+        return;
+    }
+    if (!configurationIsValid()) {
+        const auto invalidation =
+            deviceService_ != nullptr ? deviceService_->invalidationError() : AudioErrorCode::none;
+        requestRecovery(invalidation == AudioErrorCode::none ? AudioErrorCode::invalidConfiguration
+                                                             : invalidation);
         return;
     }
     if (inputChannelData == nullptr || numInputChannels < 1 || inputChannelData[0] == nullptr) {
@@ -340,6 +354,11 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     const auto next = previous == 0.0 ? elapsed : previous * 0.9 + elapsed * 0.1;
     callbackTimeEmaMicroseconds_.store(next, std::memory_order_relaxed);
 
+    const auto outputStillPermitted =
+        outputPermitted_.load(std::memory_order_acquire) &&
+        outputGeneration == outputGeneration_.load(std::memory_order_acquire) &&
+        configurationIsValid();
+
 #ifndef NDEBUG
     if (callbackEnteredForTesting_ != nullptr && callbackReleaseForTesting_ != nullptr) {
         callbackEnteredForTesting_->store(true, std::memory_order_release);
@@ -349,9 +368,6 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     }
 #endif
 
-    const auto outputStillPermitted =
-        outputPermitted_.load(std::memory_order_acquire) &&
-        outputGeneration == outputGeneration_.load(std::memory_order_acquire);
     if (!outputStillPermitted || !callbackScope.tryCommit()) {
         clearOutputs(outputChannelData, numOutputChannels, framesToClear);
         callbackScope.finishCancelled();
@@ -401,7 +417,7 @@ void AudioEngine::completeStop() noexcept {
 }
 
 void AudioEngine::waitForCallbackQuiescence() const noexcept {
-    while (callbackState_.load(std::memory_order_acquire) != AudioCallbackState::idle) {
+    while (callbackState_->load(std::memory_order_acquire) != AudioCallbackState::idle) {
         std::this_thread::yield();
     }
 }
@@ -416,8 +432,8 @@ void AudioEngine::cancelOutput() noexcept {
     outputPermitted_.store(false, std::memory_order_release);
     outputGeneration_.fetch_add(1, std::memory_order_acq_rel);
     auto expected = AudioCallbackState::active;
-    (void)callbackState_.compare_exchange_strong(expected, AudioCallbackState::cancelled,
-                                                 std::memory_order_acq_rel);
+    (void)callbackState_->compare_exchange_strong(expected, AudioCallbackState::cancelled,
+                                                  std::memory_order_acq_rel);
 }
 
 void AudioEngine::requestRecovery(AudioErrorCode error) noexcept {
@@ -473,7 +489,7 @@ void AudioEngine::prepareForTesting(double sampleRate) {
     configured_.store(true, std::memory_order_release);
     recoveryPending_.store(false, std::memory_order_release);
     outputPermitted_.store(false, std::memory_order_release);
-    callbackState_.store(AudioCallbackState::idle, std::memory_order_release);
+    callbackState_->store(AudioCallbackState::idle, std::memory_order_release);
     callbackInvariantViolation_.store(false, std::memory_order_release);
 }
 
@@ -496,6 +512,10 @@ void AudioEngine::setCallbackBarrierForTesting(std::atomic<bool>* entered,
                                                std::atomic<bool>* release) noexcept {
     callbackEnteredForTesting_ = entered;
     callbackReleaseForTesting_ = release;
+}
+
+void AudioEngine::revokeOutputForTesting() noexcept {
+    cancelOutput();
 }
 
 bool AudioEngine::callbackInvariantViolationForTesting() const noexcept {

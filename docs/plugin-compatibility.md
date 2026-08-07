@@ -1,6 +1,6 @@
 # VST3 compatibility and scanning
 
-Shi-tate v0.1 accepts a deliberately narrow VST3 subset. A successful scan
+Shi-tate v0.2 accepts a deliberately narrow VST3 subset. A successful scan
 means that a plug-in passed deterministic discovery checks; it is not a general
 compatibility certification.
 
@@ -67,10 +67,9 @@ The parent limits inherited environment variables, closes unrelated file
 descriptors, and owns a dedicated process group, but users should scan only
 plug-ins they trust.
 
-Scanning isolation does not extend to runtime hosting in v0.1. When runtime
-hosting is implemented, a selected VST3 will execute inside the main app with
-the user's permissions and may crash, hang, access files, or use the network.
-Load only plug-ins you trust.
+Scanning isolation does not extend to runtime hosting in v0.2. A selected VST3
+executes inside the main app with the user's permissions and may crash, hang,
+access files, or use the network. Load only plug-ins you trust.
 
 ## Deterministic fixture coverage
 

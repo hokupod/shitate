@@ -26,15 +26,15 @@ struct MainView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
-                    model.isRoutingActive ? model.stopRouting() : model.startRouting()
+                    model.performPrimaryAudioAction()
                 } label: {
                     Label(
-                        model.isRoutingActive ? "Stop Routing" : "Start Routing",
+                        model.primaryAudioActionTitle,
                         systemImage: model.isRoutingActive ? "stop.fill" : "play.fill"
                     )
                 }
-                .disabled(routingButtonDisabled)
-                .help(model.isRoutingActive ? "Stop audio routing" : "Start audio routing")
+                .disabled(model.primaryAudioActionDisabled)
+                .help(model.primaryAudioActionTitle)
 
                 Button {
                     model.toggleMute()
@@ -91,15 +91,6 @@ struct MainView: View {
             case .about:
                 AboutView()
             }
-        }
-    }
-
-    private var routingButtonDisabled: Bool {
-        switch model.state {
-        case .starting, .stopping:
-            true
-        default:
-            !model.isRoutingActive && !model.canStartRouting
         }
     }
 

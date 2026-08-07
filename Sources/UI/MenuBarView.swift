@@ -13,10 +13,10 @@ struct MenuBarView: View {
             showMainWindow(section: model.selectedSection)
         }
         Divider()
-        Button(model.isRoutingActive ? "Stop Routing" : "Start Routing") {
-            model.isRoutingActive ? model.stopRouting() : model.startRouting()
+        Button(model.primaryAudioActionTitle) {
+            model.performPrimaryAudioAction()
         }
-        .disabled(routingButtonDisabled)
+        .disabled(model.primaryAudioActionDisabled)
         Button(model.isMuted ? "Unmute" : "Mute") {
             model.toggleMute()
         }
@@ -26,7 +26,7 @@ struct MenuBarView: View {
             "Input: \(model.selectedInput?.displayName ?? "Not selected")",
             systemImage: "mic"
         )
-        Label("Output: BlackHole 2ch", systemImage: "arrow.up.forward.circle")
+        Label("Output: \(model.activeOutputDescription)", systemImage: "arrow.up.forward.circle")
         if let error = model.lastError {
             Label(error, systemImage: "exclamationmark.triangle")
         }
@@ -40,15 +40,6 @@ struct MenuBarView: View {
         Divider()
         Button("Quit Shi-tate") {
             NSApplication.shared.terminate(nil)
-        }
-    }
-
-    private var routingButtonDisabled: Bool {
-        switch model.state {
-        case .starting, .stopping:
-            true
-        default:
-            !model.isRoutingActive && !model.canStartRouting
         }
     }
 

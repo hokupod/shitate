@@ -15,6 +15,30 @@
         maximumBufferFrames:(NSInteger)maximumBufferFrames
                       alive:(BOOL)alive
                   aggregate:(BOOL)aggregate {
+    return [self initWithUID:uid
+                 displayName:displayName
+           inputChannelNames:inputChannelNames
+          outputChannelNames:outputChannelNames
+                 sampleRates:sampleRates
+         allowedBufferFrames:allowedBufferFrames
+         minimumBufferFrames:minimumBufferFrames
+         maximumBufferFrames:maximumBufferFrames
+                       alive:alive
+                   aggregate:aggregate
+                    physical:NO];
+}
+
+- (instancetype)initWithUID:(NSString*)uid
+                displayName:(NSString*)displayName
+          inputChannelNames:(NSArray<NSString*>*)inputChannelNames
+         outputChannelNames:(NSArray<NSString*>*)outputChannelNames
+                sampleRates:(NSArray<NSNumber*>*)sampleRates
+        allowedBufferFrames:(NSArray<NSNumber*>*)allowedBufferFrames
+        minimumBufferFrames:(NSInteger)minimumBufferFrames
+        maximumBufferFrames:(NSInteger)maximumBufferFrames
+                      alive:(BOOL)alive
+                  aggregate:(BOOL)aggregate
+                   physical:(BOOL)physical {
     self = [super init];
     if (self != nil) {
         _uid = [uid copy];
@@ -27,6 +51,7 @@
         _maximumBufferFrames = maximumBufferFrames;
         _alive = alive;
         _aggregate = aggregate;
+        _physical = physical;
     }
     return self;
 }

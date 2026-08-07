@@ -173,6 +173,19 @@ std::vector<AudioObjectID> systemAudioDevices() {
                                         address(kAudioHardwarePropertyDevices));
 }
 
+std::optional<std::string> systemDefaultOutputDeviceUID() {
+    const auto device = scalarProperty<AudioObjectID>(
+        kAudioObjectSystemObject, address(kAudioHardwarePropertyDefaultOutputDevice));
+    if (!device.has_value() || *device == kAudioObjectUnknown) {
+        return std::nullopt;
+    }
+    auto uid = stringProperty(*device, address(kAudioDevicePropertyDeviceUID));
+    if (uid.empty()) {
+        return std::nullopt;
+    }
+    return uid;
+}
+
 std::optional<AudioObjectID> audioDeviceForUID(std::string_view uid) {
     const auto uidString =
         CFStringCreateWithBytes(kCFAllocatorDefault, reinterpret_cast<const UInt8*>(uid.data()),
@@ -198,6 +211,29 @@ std::optional<AudioObjectID> audioDeviceForUID(std::string_view uid) {
 bool isAggregate(AudioObjectID device) {
     return scalarProperty<AudioClassID>(device, address(kAudioObjectPropertyClass)) ==
            kAudioAggregateDeviceClassID;
+}
+
+bool hasPhysicalTransport(AudioObjectID device) {
+    const auto transport =
+        scalarProperty<UInt32>(device, address(kAudioDevicePropertyTransportType));
+    if (!transport.has_value()) {
+        return false;
+    }
+
+    switch (*transport) {
+    case kAudioDeviceTransportTypeBuiltIn:
+    case kAudioDeviceTransportTypePCI:
+    case kAudioDeviceTransportTypeUSB:
+    case kAudioDeviceTransportTypeFireWire:
+    case kAudioDeviceTransportTypeBluetooth:
+    case kAudioDeviceTransportTypeBluetoothLE:
+    case kAudioDeviceTransportTypeHDMI:
+    case kAudioDeviceTransportTypeDisplayPort:
+    case kAudioDeviceTransportTypeThunderbolt:
+        return true;
+    default:
+        return false;
+    }
 }
 
 std::optional<AudioObjectID> activePrivateAggregateDevice() {
@@ -255,6 +291,7 @@ std::vector<AudioDeviceInfo> discoverDevices(juce::AudioIODeviceType& type) {
             .alive = scalarProperty<UInt32>(device, address(kAudioDevicePropertyDeviceIsAlive))
                          .value_or(0) != 0,
             .aggregate = isAggregate(device),
+            .physical = hasPhysicalTransport(device),
         };
 
         if (!inputs.empty()) {
@@ -372,8 +409,11 @@ AggregateEvidence evidenceFromComposition(CFDictionaryRef composition,
     evidence.outputPresent =
         std::find(details.orderedSubdeviceUIDs.begin(), details.orderedSubdeviceUIDs.end(),
                   expectedOutputUID) != details.orderedSubdeviceUIDs.end();
-    if (const auto found = details.driftCompensationByUID.find(std::string(expectedInputUID));
-        found != details.driftCompensationByUID.end()) {
+    if (expectedInputUID == expectedOutputUID) {
+        evidence.inputDriftCompensated = true;
+    } else if (const auto found =
+                   details.driftCompensationByUID.find(std::string(expectedInputUID));
+               found != details.driftCompensationByUID.end()) {
         evidence.inputDriftCompensated = found->second;
     }
     evidence.subdevicesMatch = details.orderedSubdeviceUIDs == expectedSubdevices;
@@ -450,9 +490,19 @@ DeviceService::DeviceService(RealtimeEventQueue& eventQueue) : eventQueue_(event
     if (coreAudioType_ != nullptr) {
         coreAudioType_->addListener(this);
     }
+    auto property = address(kAudioHardwarePropertyDefaultOutputDevice);
+    defaultOutputListenerInstalled_ =
+        AudioObjectAddPropertyListener(kAudioObjectSystemObject, &property,
+                                       &DeviceService::defaultOutputPropertyChanged, this) == noErr;
 }
 
 DeviceService::~DeviceService() {
+    if (defaultOutputListenerInstalled_) {
+        auto property = address(kAudioHardwarePropertyDefaultOutputDevice);
+        (void)AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &property,
+                                                &DeviceService::defaultOutputPropertyChanged, this);
+        defaultOutputListenerInstalled_ = false;
+    }
     if (coreAudioType_ != nullptr) {
         coreAudioType_->removeListener(this);
     }
@@ -473,6 +523,19 @@ std::vector<AudioDeviceInfo> DeviceService::enumerateDevices() {
         return {};
     }
     return discoverDevices(*coreAudioType_);
+}
+
+std::optional<AudioDeviceInfo> DeviceService::defaultOutputDevice() {
+    const auto uid = systemDefaultOutputDeviceUID();
+    if (!uid.has_value()) {
+        return std::nullopt;
+    }
+    const auto devices = enumerateDevices();
+    const auto* device = findByUID(devices, *uid);
+    if (device == nullptr) {
+        return std::nullopt;
+    }
+    return *device;
 }
 
 const AudioDeviceInfo* DeviceService::findByUID(const std::vector<AudioDeviceInfo>& devices,
@@ -509,14 +572,10 @@ int DeviceService::choosePreferredBuffer(const AudioDeviceInfo& input,
 }
 
 AudioResult DeviceService::validateConfiguration(const AudioConfiguration& configuration,
-                                                 const std::vector<AudioDeviceInfo>& devices) {
-    const auto blackHoleCount =
-        std::count_if(devices.begin(), devices.end(), [](const auto& device) {
-            return device.alive && device.hasOutputs() && device.displayName == blackHoleName;
-        });
-    const auto* blackHole = findByUID(devices, configuration.blackHoleDeviceUID);
-    if (blackHoleCount != 1 || blackHole == nullptr || !blackHole->alive ||
-        !blackHole->hasOutputs() || blackHole->displayName != blackHoleName) {
+                                                 const std::vector<AudioDeviceInfo>& devices,
+                                                 std::string_view defaultOutputDeviceUID) {
+    const auto* blackHole = findBlackHole(devices);
+    if (blackHole == nullptr || blackHole->uid != configuration.blackHoleDeviceUID) {
         return AudioResult::failure(
             AudioErrorCode::blackHoleMissing,
             "The saved BlackHole 2ch identity is unavailable or ambiguous.");
@@ -529,12 +588,35 @@ AudioResult DeviceService::validateConfiguration(const AudioConfiguration& confi
     }
 
     const auto* output = findByUID(devices, configuration.outputDeviceUID);
-    if (output == nullptr || !output->alive || !output->hasOutputs()) {
+    if (configuration.outputTarget == AudioOutputTarget::systemPreview) {
+        if (configuration.mode != RoutingMode::automaticPrivateAggregate || input->aggregate ||
+            !input->physical) {
+            return AudioResult::failure(
+                AudioErrorCode::invalidConfiguration,
+                "System preview requires the automatic physical-input configuration.");
+        }
+        if (defaultOutputDeviceUID.empty()) {
+            return AudioResult::failure(AudioErrorCode::previewOutputUnavailable,
+                                        "The macOS default output is unavailable.");
+        }
+        if (configuration.outputDeviceUID != defaultOutputDeviceUID) {
+            return AudioResult::failure(
+                AudioErrorCode::previewOutputChanged,
+                "The macOS default output changed before preview could start.");
+        }
+        if (output == nullptr || !output->alive || !output->hasOutputs() || output->aggregate ||
+            !output->physical || output->outputChannelNames.size() < 2 ||
+            configuration.outputDeviceUID == configuration.blackHoleDeviceUID ||
+            output->displayName == blackHoleName) {
+            return AudioResult::failure(AudioErrorCode::previewOutputUnavailable,
+                                        "Preview requires a live, physical, non-aggregate, "
+                                        "two-channel system output other than "
+                                        "BlackHole 2ch.");
+        }
+    } else if (output == nullptr || !output->alive || !output->hasOutputs()) {
         return AudioResult::failure(AudioErrorCode::outputDeviceMissing,
                                     "The saved output device UID is unavailable.");
-    }
-
-    if (configuration.mode == RoutingMode::automaticPrivateAggregate) {
+    } else if (configuration.mode == RoutingMode::automaticPrivateAggregate) {
         if (configuration.outputDeviceUID != configuration.blackHoleDeviceUID ||
             output->displayName != blackHoleName) {
             return AudioResult::failure(AudioErrorCode::blackHoleMissing,
@@ -631,6 +713,7 @@ DeviceService::validateRoutingEvidence(RoutingMode mode, const AggregateEvidence
 
 AudioResult DeviceService::configure(const AudioConfiguration& configuration) {
     close();
+    invalidationError_.store(AudioErrorCode::none, std::memory_order_release);
     {
         const std::scoped_lock lock(controlMutex_);
         configuration_.reset();
@@ -639,11 +722,17 @@ AudioResult DeviceService::configure(const AudioConfiguration& configuration) {
         expectedSubdeviceUIDs_.clear();
     }
     const auto devices = enumerateDevices();
-    if (const auto validation = validateConfiguration(configuration, devices);
+    const auto defaultOutputUID = systemDefaultOutputDeviceUID().value_or(std::string{});
+    if (configuration.outputTarget == AudioOutputTarget::systemPreview &&
+        !defaultOutputListenerInstalled_) {
+        return AudioResult::failure(
+            AudioErrorCode::previewOutputUnavailable,
+            "The macOS default-output change listener could not be installed.");
+    }
+    if (const auto validation = validateConfiguration(configuration, devices, defaultOutputUID);
         !validation.succeeded()) {
         return validation;
     }
-
     const auto* input = findByUID(devices, configuration.inputDeviceUID);
     const auto* output = findByUID(devices, configuration.outputDeviceUID);
     if (input == nullptr || output == nullptr || coreAudioType_ == nullptr) {
@@ -657,8 +746,10 @@ AudioResult DeviceService::configure(const AudioConfiguration& configuration) {
     }
 
     auto evidenceInputUID = configuration.inputDeviceUID;
-    auto expectedSubdevices =
-        std::vector<std::string>{configuration.outputDeviceUID, configuration.inputDeviceUID};
+    auto expectedSubdevices = std::vector<std::string>{configuration.outputDeviceUID};
+    if (configuration.inputDeviceUID != configuration.outputDeviceUID) {
+        expectedSubdevices.push_back(configuration.inputDeviceUID);
+    }
     if (configuration.mode == RoutingMode::manualAggregate) {
         const auto manualAggregate = inspectManualAggregate(configuration);
         if (const auto validation = validateManualAggregateEvidence(manualAggregate);
@@ -667,6 +758,13 @@ AudioResult DeviceService::configure(const AudioConfiguration& configuration) {
         }
         evidenceInputUID = manualAggregate.selectedInputSubdeviceUID;
         expectedSubdevices = manualAggregate.orderedSubdeviceUIDs;
+    }
+
+    if (configuration.outputTarget == AudioOutputTarget::systemPreview &&
+        systemDefaultOutputDeviceUID().value_or(std::string{}) != configuration.outputDeviceUID) {
+        return AudioResult::failure(
+            AudioErrorCode::previewOutputChanged,
+            "The macOS default output changed immediately before preview configuration.");
     }
 
     auto device = std::unique_ptr<juce::AudioIODevice>(
@@ -699,15 +797,34 @@ AudioResult DeviceService::configure(const AudioConfiguration& configuration) {
                                     "CoreAudio did not apply the requested format exactly.");
     }
 
+    outputTarget_.store(configuration.outputTarget, std::memory_order_release);
+    if (configuration.outputTarget == AudioOutputTarget::systemPreview &&
+        (invalidationError() != AudioErrorCode::none ||
+         systemDefaultOutputDeviceUID().value_or(std::string{}) != configuration.outputDeviceUID)) {
+        device->close();
+        outputTarget_.store(AudioOutputTarget::blackHole, std::memory_order_release);
+        return AudioResult::failure(
+            AudioErrorCode::previewOutputChanged,
+            "The macOS default output changed while preview was being configured.");
+    }
+
     {
         const std::scoped_lock lock(controlMutex_);
         activeDevice_ = std::move(device);
         configuration_ = configuration;
         evidenceInputDeviceUID_ = std::move(evidenceInputUID);
-        evidenceOutputDeviceUID_ = configuration.blackHoleDeviceUID;
+        evidenceOutputDeviceUID_ = configuration.outputDeviceUID;
         expectedSubdeviceUIDs_ = std::move(expectedSubdevices);
     }
     configurationValid_.store(true, std::memory_order_release);
+
+    if (configuration.outputTarget == AudioOutputTarget::systemPreview &&
+        invalidationError() != AudioErrorCode::none) {
+        close();
+        return AudioResult::failure(
+            AudioErrorCode::previewOutputChanged,
+            "The macOS default output changed while preview was being configured.");
+    }
 
     const auto automaticEvidence = configuration.mode == RoutingMode::automaticPrivateAggregate
                                        ? activeAggregateEvidence()
@@ -728,14 +845,25 @@ AudioResult DeviceService::configure(const AudioConfiguration& configuration) {
                                     "CoreAudio xrun observation could not be installed.");
     }
 
+    if (configuration.outputTarget == AudioOutputTarget::systemPreview &&
+        (invalidationError() != AudioErrorCode::none ||
+         systemDefaultOutputDeviceUID().value_or(std::string{}) != configuration.outputDeviceUID)) {
+        close();
+        return AudioResult::failure(
+            AudioErrorCode::previewOutputChanged,
+            "The macOS default output changed before preview configuration completed.");
+    }
+
     return AudioResult::success();
 }
 
 AudioResult DeviceService::start(juce::AudioIODeviceCallback* callback) {
     const std::scoped_lock lock(controlMutex_);
     if (!isConfigurationValid() || activeDevice_ == nullptr || callback == nullptr) {
-        return AudioResult::failure(AudioErrorCode::engineStartFailed,
-                                    "Audio is not configured for a fail-closed start.");
+        const auto error = invalidationError();
+        return AudioResult::failure(
+            error == AudioErrorCode::none ? AudioErrorCode::engineStartFailed : error,
+            "Audio is not configured for a fail-closed start.");
     }
 
     activeDevice_->start(callback);
@@ -747,6 +875,16 @@ AudioResult DeviceService::start(juce::AudioIODeviceCallback* callback) {
     return AudioResult::success();
 }
 
+std::atomic<AudioCallbackState>& DeviceService::callbackCommitState() noexcept {
+    return callbackCommitState_;
+}
+
+void DeviceService::revokeCallbackCommit() noexcept {
+    auto expected = AudioCallbackState::active;
+    (void)callbackCommitState_.compare_exchange_strong(expected, AudioCallbackState::cancelled,
+                                                       std::memory_order_acq_rel);
+}
+
 void DeviceService::stop() noexcept {
     const std::scoped_lock lock(controlMutex_);
     if (activeDevice_ != nullptr) {
@@ -756,6 +894,8 @@ void DeviceService::stop() noexcept {
 
 void DeviceService::close() noexcept {
     configurationValid_.store(false, std::memory_order_release);
+    revokeCallbackCommit();
+    outputTarget_.store(AudioOutputTarget::blackHole, std::memory_order_release);
     const std::scoped_lock lock(controlMutex_);
     removeXrunListener();
     if (activeDevice_ != nullptr) {
@@ -767,6 +907,10 @@ void DeviceService::close() noexcept {
 
 bool DeviceService::isConfigurationValid() const noexcept {
     return configurationValid_.load(std::memory_order_acquire);
+}
+
+AudioErrorCode DeviceService::invalidationError() const noexcept {
+    return invalidationError_.load(std::memory_order_acquire);
 }
 
 EngineDiagnostics DeviceService::diagnostics() const noexcept {
@@ -832,9 +976,11 @@ DeviceService::configuredEnvironmentError(const std::vector<AudioDeviceInfo>& de
     }
 
     if (!configurationValid_.load(std::memory_order_acquire)) {
-        return AudioErrorCode::engineStartFailed;
+        const auto error = invalidationError();
+        return error == AudioErrorCode::none ? AudioErrorCode::engineStartFailed : error;
     }
-    if (const auto validation = validateConfiguration(*configuration, devices);
+    const auto defaultOutputUID = systemDefaultOutputDeviceUID().value_or(std::string{});
+    if (const auto validation = validateConfiguration(*configuration, devices, defaultOutputUID);
         !validation.succeeded()) {
         return validation.code;
     }
@@ -873,7 +1019,9 @@ void DeviceService::audioDeviceListChanged() {
         return;
     }
 
+    invalidationError_.store(error, std::memory_order_release);
     configurationValid_.store(false, std::memory_order_release);
+    revokeCallbackCommit();
     close();
     {
         const std::scoped_lock lock(controlMutex_);
@@ -940,5 +1088,29 @@ OSStatus DeviceService::xrunPropertyChanged(AudioObjectID object, UInt32 address
     }
     return noErr;
 }
+
+OSStatus DeviceService::defaultOutputPropertyChanged(AudioObjectID object, UInt32 addressCount,
+                                                     const AudioObjectPropertyAddress* addresses,
+                                                     void* clientData) noexcept {
+    juce::ignoreUnused(object, addressCount, addresses);
+    auto* service = static_cast<DeviceService*>(clientData);
+    if (service == nullptr) {
+        return noErr;
+    }
+
+    if (service->outputTarget_.load(std::memory_order_acquire) ==
+        AudioOutputTarget::systemPreview) {
+        service->invalidationError_.store(AudioErrorCode::previewOutputChanged,
+                                          std::memory_order_release);
+        service->configurationValid_.store(false, std::memory_order_release);
+        service->revokeCallbackCommit();
+    }
+    (void)service->eventQueue_.push({.type = CoreEventType::devicesChanged});
+    return noErr;
+}
+
+static_assert(std::atomic<AudioErrorCode>::is_always_lock_free);
+static_assert(std::atomic<AudioOutputTarget>::is_always_lock_free);
+static_assert(std::atomic<AudioCallbackState>::is_always_lock_free);
 
 } // namespace shitate

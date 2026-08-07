@@ -47,6 +47,14 @@ NSError* STMakeAudioBridgeError(NSInteger code, NSString* technicalDetail) {
         description = @"CoreAudio reported an overrun or underrun. Check the audio configuration "
                       @"before continuing.";
         break;
+    case STBridgeErrorCodePreviewOutputUnavailable:
+        description = @"Preview did not start because the macOS main output is unavailable or "
+                      @"unsupported. Choose a non-aggregate stereo output that supports 48 kHz.";
+        break;
+    case STBridgeErrorCodePreviewOutputChanged:
+        description = @"Preview stopped because the macOS main output changed. Shi-tate did not "
+                      @"follow the new device automatically.";
+        break;
     default:
         description = @"Audio routing is unavailable and output remains silent. Review Audio "
                       @"Settings before trying again.";

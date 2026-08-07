@@ -34,7 +34,7 @@ for relative_path in "${required_files[@]}"; do
 done
 
 version="$(tr -d '\r\n' < "${repo_root}/VERSION")"
-[[ "${version}" == "0.1.0-dev" ]] || fail "VERSION must be 0.1.0-dev"
+[[ "${version}" == "0.2.0-dev" ]] || fail "VERSION must be 0.2.0-dev"
 
 readmes=(README.md README.ja.md README.zh-CN.md)
 for readme in "${readmes[@]}"; do
@@ -42,7 +42,7 @@ for readme in "${readmes[@]}"; do
   grep -Fq '[English](README.md)' "${path}" || fail "${readme}: missing English link"
   grep -Fq '[日本語](README.ja.md)' "${path}" || fail "${readme}: missing Japanese link"
   grep -Fq '[简体中文](README.zh-CN.md)' "${path}" || fail "${readme}: missing Chinese link"
-  grep -Fq '0.1.0-dev' "${path}" || fail "${readme}: version mismatch"
+  grep -Fq '0.2.0-dev' "${path}" || fail "${readme}: version mismatch"
   grep -Fq 'f8f8864172464b9adf9eba6101e1f784838d1597' "${path}" || fail "${readme}: JUCE pin mismatch"
   grep -Fq 'AGPL-3.0-only' "${path}" || fail "${readme}: license mismatch"
   grep -Fq 'BlackHole 2ch' "${path}" || fail "${readme}: BlackHole requirement missing"

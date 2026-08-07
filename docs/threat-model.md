@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <!-- Copyright (C) 2026 Hokuto Takemiya -->
 
-# v0.1 threat model
+# v0.2 threat model
 
 ## Scope and assets
 
@@ -16,7 +16,8 @@ integrity, and a recoverable next launch.
 ## Trust boundaries
 
 1. **Microphone → audio callback**: live audio must remain memory-only and reach
-   only the explicitly configured BlackHole path.
+   only the explicitly configured BlackHole path or an explicit, exclusive
+   system-output Preview path.
 2. **Filesystem → scanner**: VST3 paths, signatures, architecture, classes, and
    fingerprints are untrusted input.
 3. **Scanner → app**: bounded JSON is parsed strictly; scanner failure is not
@@ -35,7 +36,7 @@ integrity, and a recoverable next launch.
 | Malicious/replaced VST3 | Canonical containment, Security.framework validation, architecture/class/layout policy, exact cdhash immediately before load, explicit ad-hoc approval | Signed code may still be malicious; runtime code shares the app process and user permissions |
 | Scanner crash/hang | One bundle per helper process, bounded protocol, timeout, terminate/kill/reap integration tests | Scanner is not a runtime sandbox and still reads the selected bundle |
 | Runtime crash/hang | Atomic write-before-load journal, dirty-run history, next-launch safe mode, exact-fingerprint block after three crashes, disposable crash test | Current call can still fail; native runtime isolation is deferred |
-| Wrong audio destination | Exact saved device identities, 48 kHz/allowed buffers, no fallback, mute/stop on device or permission loss | CoreAudio/driver defects remain external; long-duration manual gates remain required |
+| Wrong audio destination | Exact BlackHole identity; Preview snapshots and revalidates the current physical default-output UID; no fallback or automatic following; callback commit is revoked before stop on device or permission loss | CoreAudio/driver defects remain external; acoustic, disconnect, and long-duration manual gates remain required |
 | Non-finite plug-in output | Per-slot backup/restore/fault and final output safety tests | A plug-in can consume CPU, hang, or alter other process memory before detection |
 | Persistence traversal/symlink or corruption | Owner-only directories/files, `O_NOFOLLOW`, link/owner/mode/size/schema validation, atomic rename/fsync, future-schema fail-closed tests | A process already acting as the user may modify user-owned files |
 | Diagnostic disclosure | Asynchronous bounded logs, 5 MiB × three rotations, home redaction, scoped UID hash, 64 KiB explicit-copy report, negative tests | Plug-in names and device display names remain intentionally visible to the user |
@@ -45,7 +46,7 @@ integrity, and a recoverable next launch.
 
 ## Entitlement decision
 
-App Sandbox is disabled for v0.1 because common VST3 plug-ins need license,
+App Sandbox is disabled for v0.2 because common VST3 plug-ins need license,
 preset, and content access. Hardened Runtime remains enabled. The app has audio
 input and disables Library Validation; the scanner disables Library Validation
 but has no audio-input entitlement. JIT, unsigned executable memory,

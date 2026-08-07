@@ -20,6 +20,55 @@ hardware and communication applications. `UNVERIFIED` is not a pass.
 The default CTest run executes `AudioHardwareIntegrationTest` with return code
 77. CTest must report it as `Skipped`, with an explicit opt-in reason.
 
+## v0.2 main-output Preview record
+
+- Recorded: 2026-08-07 23:22 (JST)
+- Build: local `0.2.0-dev` Debug `ALL_BUILD` succeeded.
+- Automated suite: 29 registered, 28 passed, 0 failed, 1 hardware opt-in skip.
+- Device contract: `DeviceServiceTest` accepts only the exact default-output UID
+  and rejects BlackHole, aggregate, virtual, dead, mono, non-48-kHz, unsupported
+  buffer, missing default, changed UID, and Manual Aggregate Preview cases.
+- State contract: Swift tests cover stopped/running/muted entry, captured
+  `wasRouting`/`wasMuted`, explicit return, real output naming, and return-context
+  destruction on each failure phase.
+- Regression contract: existing callback bounds, allocation policy, NaN/Inf
+  removal, private aggregate evidence, BlackHole identity, and stop quiescence
+  tests remain in the passing suite.
+- Preview hardware gate: AT2040USB input and the current AT2040USB main output
+  passed muted 48 kHz runs at 128, 256, and 512 frames. Every run reported a
+  private aggregate, exact subdevices, output clock ownership, input drift
+  compensation, asynchronous stop completion, and xrun 0.
+- Default-output change gate: during a muted 256-frame Preview, the default was
+  temporarily changed to the unique physical EV2785 output. The callback
+  reported `previewOutputChanged`, fail-closed reached `blocked`, and the exact
+  original AT2040USB default-output UID was restored and independently
+  re-observed through System Profiler. This was a controlled one-time gate; the
+  committed test does not mutate the system default because crash-safe
+  supervision is not yet implemented.
+- Interactive verification: the user reported that the v0.2 main-output Preview
+  operated successfully. The exact output device, plug-in, prior routing state,
+  and mute state were not recorded.
+
+| v0.2 Preview path | Status | Evidence boundary |
+|---|---|---|
+| Default-output identity and format enforcement | VERIFIED | Unit rejection matrix plus live exact-default 48 kHz runs at 128/256/512 frames |
+| Start/Stop return context and mute preservation | AUTOMATED | State transition tests; no acoustic output |
+| Processed audio on the macOS main output | USER-REPORTED | Interactive confirmation; exact hardware and plug-in were not recorded |
+| Private aggregate excludes BlackHole during Preview | VERIFIED | Live `subdevicesMatch=1` with only the selected input and exact default-output target expected |
+| No simultaneous signal on BlackHole | UNVERIFIED | Requires measuring both destinations during Preview |
+| Default-output change stops Preview | VERIFIED | Live AT2040USB → EV2785 switch produced `previewOutputChanged=1`, `blocked`, and exact default restoration |
+| Preview-output disconnection stops Preview | UNVERIFIED | Default change passed; physical disconnect was not performed |
+| Explicit Stop restores prior BlackHole running/muted state | UNVERIFIED | State contract is automated; live route restoration not performed |
+| Click-free transitions and acoustic quality | UNVERIFIED | No explicit click or quality evaluation was reported |
+| Short Preview runs at 128/256/512 with xrun 0 | VERIFIED | Muted AT2040USB hardware gates; 250 ms per buffer size |
+| Long-duration xrun 0 | UNVERIFIED | No Preview endurance run was performed |
+
+These results confirm only the user-reported audible main-output Preview path.
+They do not claim acoustic quality, clickless transitions, live output
+signal exclusivity on BlackHole, physical-disconnect behavior, explicit
+BlackHole restoration, or long-duration xrun 0. Those claims require the
+hardware cases above to be run and recorded separately.
+
 ## Short hardware-gate record
 
 - Recorded: 2026-08-07 08:47 (JST)
@@ -186,9 +235,21 @@ SHITATE_TEST_BUFFER_FRAMES=256 \
 ctest --test-dir build/dev -C Debug -R AudioHardwareIntegrationTest -V
 ```
 
-The test records only aggregate-property booleans, actual format, latency, and
-xrun count. It fails if the aggregate is not private, BlackHole does not own the
-clock, input drift compensation is absent, or the requested format changes.
+Preview uses the current physical macOS default output and starts muted:
+
+```bash
+SHITATE_RUN_AUDIO_HARDWARE_TESTS=1 \
+SHITATE_TEST_PREVIEW=1 \
+SHITATE_TEST_INPUT_NAME='AT2040USB' \
+SHITATE_TEST_BUFFER_FRAMES=256 \
+ctest --test-dir build/dev -C Debug -R AudioHardwareIntegrationTest -V
+```
+
+The test records only aggregate-property booleans, target kind, mute state,
+actual format, latency, and xrun count. It never prints device UIDs or changes
+the system default. It fails if the aggregate is not private, the exact output
+does not own the clock, input drift compensation is absent, or the requested
+short-run contract changes.
 
 ## Required hardware evidence
 

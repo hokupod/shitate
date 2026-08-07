@@ -168,6 +168,29 @@ class AudioEngineTest final : public juce::UnitTest {
         expect(engine.callbackInvariantViolationForTesting());
         resetEngine();
 
+        beginTest("revocation after final validation cancels the in-flight output commit");
+        firstLeft.fill(1.0F);
+        firstRight.fill(1.0F);
+        callbackEntered.store(false, std::memory_order_release);
+        releaseCallback.store(false, std::memory_order_release);
+        engine.setCallbackBarrierForTesting(&callbackEntered, &releaseCallback);
+        std::thread revokedCallback([&] {
+            engine.audioDeviceIOCallbackWithContext(inputChannels, 1, firstOutputs, 2, 512,
+                                                    context);
+        });
+        while (!callbackEntered.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        engine.revokeOutputForTesting();
+        releaseCallback.store(true, std::memory_order_release);
+        revokedCallback.join();
+        engine.setCallbackBarrierForTesting(nullptr, nullptr);
+        expect(std::all_of(firstLeft.begin(), firstLeft.end(),
+                           [](float sample) { return sample == 0.0F; }));
+        expect(std::all_of(firstRight.begin(), firstRight.end(),
+                           [](float sample) { return sample == 0.0F; }));
+        resetEngine();
+
         beginTest("normal stop publishes quiescence only after processBlock returns");
         shitate::RealtimeEventQueue pluginQueue;
         shitate::PluginChain pluginChain;

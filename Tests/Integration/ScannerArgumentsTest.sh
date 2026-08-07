@@ -12,7 +12,7 @@ if [[ ! -x "$scanner" ]]; then
 fi
 
 actual_version=$("$scanner" --version)
-if [[ "$actual_version" != "ShitatePluginScanner 0.1.0-dev" ]]; then
+if [[ "$actual_version" != "ShitatePluginScanner 0.2.0-dev" ]]; then
   printf 'unexpected scanner version: %s\n' "$actual_version" >&2
   exit 1
 fi

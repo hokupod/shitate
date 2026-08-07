@@ -7,8 +7,27 @@ import XCTest
 final class BridgeVersionTests: XCTestCase {
     func testBridgeReturnsDisplayVersion() {
         let bridge = STAudioEngineBridge()
-        XCTAssertEqual(bridge.displayVersion, "0.1.0-dev")
+        XCTAssertEqual(bridge.displayVersion, "0.2.0-dev")
         XCTAssertNotNil(bridge.audioDevices())
+        _ = bridge.defaultOutputDevice()
+    }
+
+    func testLegacyAudioDeviceInitializerRemainsAvailable() {
+        let device = STAudioDeviceInfo(
+            uid: "legacy-device",
+            displayName: "Legacy Device",
+            inputChannelNames: [],
+            outputChannelNames: ["Left", "Right"],
+            sampleRates: [48_000],
+            allowedBufferFrames: [256],
+            minimumBufferFrames: 128,
+            maximumBufferFrames: 512,
+            alive: true,
+            aggregate: false
+        )
+
+        XCTAssertEqual(device.uid, "legacy-device")
+        XCTAssertFalse(device.isPhysical)
     }
 
     func testBridgeMapsCppExceptionToNSError() {
@@ -49,6 +68,9 @@ final class BridgeVersionTests: XCTestCase {
             STBridgeError.Code.pluginMutationAppliedRestartFailed.rawValue,
             315
         )
+        XCTAssertEqual(STBridgeError.Code.previewOutputUnavailable.rawValue, 111)
+        XCTAssertEqual(STBridgeError.Code.previewOutputChanged.rawValue, 112)
+        XCTAssertEqual(STAudioOutputTarget.systemPreview.rawValue, 1)
     }
 
     func testStoppedRuntimeMutationCompletesOnMainQueue() {

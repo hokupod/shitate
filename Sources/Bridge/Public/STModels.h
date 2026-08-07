@@ -20,6 +20,11 @@ typedef NS_ENUM(NSInteger, STAudioRoutingMode) {
     STAudioRoutingModeManualAggregate = 1,
 };
 
+typedef NS_ENUM(NSInteger, STAudioOutputTarget) {
+    STAudioOutputTargetBlackHole = 0,
+    STAudioOutputTargetSystemPreview = 1,
+};
+
 @interface STAudioDeviceInfo : NSObject
 
 @property(nonatomic, readonly, copy) NSString* uid;
@@ -32,6 +37,7 @@ typedef NS_ENUM(NSInteger, STAudioRoutingMode) {
 @property(nonatomic, readonly) NSInteger maximumBufferFrames;
 @property(nonatomic, readonly, getter=isAlive) BOOL alive;
 @property(nonatomic, readonly, getter=isAggregate) BOOL aggregate;
+@property(nonatomic, readonly, getter=isPhysical) BOOL physical;
 
 - (instancetype)initWithUID:(NSString*)uid
                 displayName:(NSString*)displayName
@@ -42,7 +48,18 @@ typedef NS_ENUM(NSInteger, STAudioRoutingMode) {
         minimumBufferFrames:(NSInteger)minimumBufferFrames
         maximumBufferFrames:(NSInteger)maximumBufferFrames
                       alive:(BOOL)alive
-                  aggregate:(BOOL)aggregate NS_DESIGNATED_INITIALIZER;
+                  aggregate:(BOOL)aggregate;
+- (instancetype)initWithUID:(NSString*)uid
+                displayName:(NSString*)displayName
+          inputChannelNames:(NSArray<NSString*>*)inputChannelNames
+         outputChannelNames:(NSArray<NSString*>*)outputChannelNames
+                sampleRates:(NSArray<NSNumber*>*)sampleRates
+        allowedBufferFrames:(NSArray<NSNumber*>*)allowedBufferFrames
+        minimumBufferFrames:(NSInteger)minimumBufferFrames
+        maximumBufferFrames:(NSInteger)maximumBufferFrames
+                      alive:(BOOL)alive
+                  aggregate:(BOOL)aggregate
+                   physical:(BOOL)physical NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
 @end

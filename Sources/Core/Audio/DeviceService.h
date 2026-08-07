@@ -18,6 +18,8 @@
 
 namespace shitate {
 
+class AudioEngine;
+
 class DeviceService final : private juce::AudioIODeviceType::Listener {
   public:
     explicit DeviceService(RealtimeEventQueue& eventQueue);
@@ -27,12 +29,14 @@ class DeviceService final : private juce::AudioIODeviceType::Listener {
     DeviceService& operator=(const DeviceService&) = delete;
 
     [[nodiscard]] std::vector<AudioDeviceInfo> enumerateDevices();
+    [[nodiscard]] std::optional<AudioDeviceInfo> defaultOutputDevice();
     [[nodiscard]] AudioResult configure(const AudioConfiguration& configuration);
     [[nodiscard]] AudioResult start(juce::AudioIODeviceCallback* callback);
     void stop() noexcept;
     void close() noexcept;
 
     [[nodiscard]] bool isConfigurationValid() const noexcept;
+    [[nodiscard]] AudioErrorCode invalidationError() const noexcept;
     [[nodiscard]] EngineDiagnostics diagnostics() const noexcept;
     [[nodiscard]] AggregateEvidence activeAggregateEvidence() const;
 
@@ -46,7 +50,8 @@ class DeviceService final : private juce::AudioIODeviceType::Listener {
                                                    const AudioDeviceInfo& output) noexcept;
     [[nodiscard]] static AudioResult
     validateConfiguration(const AudioConfiguration& configuration,
-                          const std::vector<AudioDeviceInfo>& devices);
+                          const std::vector<AudioDeviceInfo>& devices,
+                          std::string_view defaultOutputDeviceUID = {});
     [[nodiscard]] static AudioResult
     validateManualAggregateEvidence(const ManualAggregateEvidence& evidence);
     [[nodiscard]] static AudioResult
@@ -54,6 +59,10 @@ class DeviceService final : private juce::AudioIODeviceType::Listener {
                             const ManualAggregateEvidence& manualEvidence);
 
   private:
+    friend class AudioEngine;
+
+    [[nodiscard]] std::atomic<AudioCallbackState>& callbackCommitState() noexcept;
+    void revokeCallbackCommit() noexcept;
     void audioDeviceListChanged() override;
     [[nodiscard]] juce::AudioIODeviceType* coreAudioType() noexcept;
     [[nodiscard]] AudioErrorCode
@@ -65,6 +74,9 @@ class DeviceService final : private juce::AudioIODeviceType::Listener {
     static OSStatus xrunPropertyChanged(AudioObjectID object, UInt32 addressCount,
                                         const AudioObjectPropertyAddress* addresses,
                                         void* clientData) noexcept;
+    static OSStatus defaultOutputPropertyChanged(AudioObjectID object, UInt32 addressCount,
+                                                 const AudioObjectPropertyAddress* addresses,
+                                                 void* clientData) noexcept;
 
     RealtimeEventQueue& eventQueue_;
     juce::ScopedJuceInitialiser_GUI juceRuntime_;
@@ -77,8 +89,12 @@ class DeviceService final : private juce::AudioIODeviceType::Listener {
     std::string evidenceOutputDeviceUID_;
     std::vector<std::string> expectedSubdeviceUIDs_;
     AudioObjectID xrunDeviceID_ = kAudioObjectUnknown;
+    std::atomic<AudioCallbackState> callbackCommitState_{AudioCallbackState::idle};
     std::atomic<bool> configurationValid_{false};
+    std::atomic<AudioErrorCode> invalidationError_{AudioErrorCode::none};
+    std::atomic<AudioOutputTarget> outputTarget_{AudioOutputTarget::blackHole};
     std::atomic<int> xrunCount_{0};
+    bool defaultOutputListenerInstalled_ = false;
 };
 
 } // namespace shitate

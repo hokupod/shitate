@@ -206,7 +206,8 @@ STAudioDeviceInfo* deviceFromCpp(const shitate::AudioDeviceInfo& device) {
                               minimumBufferFrames:device.minimumBufferFrames
                               maximumBufferFrames:device.maximumBufferFrames
                                             alive:device.alive
-                                        aggregate:device.aggregate];
+                                        aggregate:device.aggregate
+                                         physical:device.physical];
 }
 
 NSArray<STAudioDeviceInfo*>* devicesFromCpp(const std::vector<shitate::AudioDeviceInfo>& devices,
@@ -533,6 +534,19 @@ NSError* exceptionError(const std::exception& exception) {
     }
 }
 
+- (STAudioDeviceInfo*)defaultOutputDevice {
+    try {
+        auto* bridgeStorage = storage(_storage);
+        if (bridgeStorage == nullptr) {
+            return nil;
+        }
+        const auto device = bridgeStorage->controller.defaultOutputDevice();
+        return device.has_value() ? deviceFromCpp(*device) : nil;
+    } catch (...) {
+        return nil;
+    }
+}
+
 - (BOOL)configureInputDeviceUID:(NSString*)inputUID
                    channelIndex:(NSInteger)channelIndex
                 outputDeviceUID:(NSString*)outputUID
@@ -542,9 +556,35 @@ NSError* exceptionError(const std::exception& exception) {
                      sampleRate:(double)sampleRate
                    bufferFrames:(NSInteger)bufferFrames
                           error:(NSError**)error {
+    return [self configureInputDeviceUID:inputUID
+                            channelIndex:channelIndex
+                         outputDeviceUID:outputUID
+                      blackHoleDeviceUID:blackHoleUID
+                                    mode:mode
+                            outputTarget:STAudioOutputTargetBlackHole
+                manualOutputChannelStart:manualOutputChannelStart
+                              sampleRate:sampleRate
+                            bufferFrames:bufferFrames
+                                   error:error];
+}
+
+- (BOOL)configureInputDeviceUID:(NSString*)inputUID
+                   channelIndex:(NSInteger)channelIndex
+                outputDeviceUID:(NSString*)outputUID
+             blackHoleDeviceUID:(NSString*)blackHoleUID
+                           mode:(STAudioRoutingMode)mode
+                   outputTarget:(STAudioOutputTarget)outputTarget
+       manualOutputChannelStart:(NSInteger)manualOutputChannelStart
+                     sampleRate:(double)sampleRate
+                   bufferFrames:(NSInteger)bufferFrames
+                          error:(NSError**)error {
     if (channelIndex < 0 || channelIndex > INT_MAX || manualOutputChannelStart < 0 ||
         manualOutputChannelStart > INT_MAX || bufferFrames < 0 || bufferFrames > INT_MAX ||
-        !std::isfinite(sampleRate)) {
+        !std::isfinite(sampleRate) ||
+        (mode != STAudioRoutingModeAutomaticPrivateAggregate &&
+         mode != STAudioRoutingModeManualAggregate) ||
+        (outputTarget != STAudioOutputTargetBlackHole &&
+         outputTarget != STAudioOutputTargetSystemPreview)) {
         if (error != nullptr) {
             *error = STMakeAudioBridgeError(STBridgeErrorCodeInvalidConfiguration,
                                             @"A numeric configuration value is out of range.");
@@ -564,6 +604,7 @@ NSError* exceptionError(const std::exception& exception) {
 
         const shitate::AudioConfiguration configuration{
             .mode = static_cast<shitate::RoutingMode>(mode),
+            .outputTarget = static_cast<shitate::AudioOutputTarget>(outputTarget),
             .inputDeviceUID = stringToUTF8(inputUID),
             .outputDeviceUID = stringToUTF8(outputUID),
             .blackHoleDeviceUID = stringToUTF8(blackHoleUID),

@@ -14,6 +14,7 @@ struct AudioDevice: Identifiable, Equatable {
     let maximumBufferFrames: Int
     let isAlive: Bool
     let isAggregate: Bool
+    let isPhysical: Bool
 
     init(_ value: STAudioDeviceInfo) {
         id = value.uid
@@ -26,6 +27,7 @@ struct AudioDevice: Identifiable, Equatable {
         maximumBufferFrames = value.maximumBufferFrames
         isAlive = value.isAlive
         isAggregate = value.isAggregate
+        isPhysical = value.isPhysical
     }
 
     init(
@@ -38,7 +40,8 @@ struct AudioDevice: Identifiable, Equatable {
         minimumBufferFrames: Int = 128,
         maximumBufferFrames: Int = 512,
         isAlive: Bool = true,
-        isAggregate: Bool = false
+        isAggregate: Bool = false,
+        isPhysical: Bool = true
     ) {
         self.id = id
         self.displayName = displayName
@@ -50,6 +53,7 @@ struct AudioDevice: Identifiable, Equatable {
         self.maximumBufferFrames = maximumBufferFrames
         self.isAlive = isAlive
         self.isAggregate = isAggregate
+        self.isPhysical = isPhysical
     }
 }
 

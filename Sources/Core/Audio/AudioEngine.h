@@ -18,8 +18,6 @@
 
 namespace shitate {
 
-enum class AudioCallbackState : std::uint8_t { idle, active, cancelled };
-
 class AudioEngine final : public juce::AudioIODeviceCallback {
   public:
     AudioEngine(DeviceService& deviceService, RealtimeEventQueue& eventQueue,
@@ -54,6 +52,7 @@ class AudioEngine final : public juce::AudioIODeviceCallback {
     void setRunningForTesting(bool running) noexcept;
     void setCallbackBarrierForTesting(std::atomic<bool>* entered,
                                       std::atomic<bool>* release) noexcept;
+    void revokeOutputForTesting() noexcept;
     [[nodiscard]] bool callbackInvariantViolationForTesting() const noexcept;
 #endif
 
@@ -86,7 +85,8 @@ class AudioEngine final : public juce::AudioIODeviceCallback {
     std::atomic<bool> outputPermitted_{false};
     std::atomic<bool> recoveryPending_{false};
     std::atomic<bool> callbackInvariantViolation_{false};
-    std::atomic<AudioCallbackState> callbackState_{AudioCallbackState::idle};
+    std::atomic<AudioCallbackState> localCallbackState_{AudioCallbackState::idle};
+    std::atomic<AudioCallbackState>* callbackState_ = &localCallbackState_;
     std::atomic<std::uint64_t> outputGeneration_{0};
     std::atomic<double> callbackTimeEmaMicroseconds_{0.0};
     std::atomic<int> lastReportedXrun_{0};

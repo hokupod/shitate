@@ -28,6 +28,7 @@ class AudioBridgeController final {
     AudioBridgeController& operator=(const AudioBridgeController&) = delete;
 
     [[nodiscard]] std::vector<AudioDeviceInfo> enumerateDevices();
+    [[nodiscard]] std::optional<AudioDeviceInfo> defaultOutputDevice();
     [[nodiscard]] AudioResult configure(const AudioConfiguration& configuration);
     [[nodiscard]] AudioResult start();
     void stop() noexcept;

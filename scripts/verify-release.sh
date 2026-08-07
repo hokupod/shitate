@@ -58,7 +58,7 @@ for executable in "$app_executable" "$helper_executable"; do
     exit 1
   fi
 done
-if [[ $(plutil -extract CFBundleShortVersionString raw -o - "$info_plist") != 0.1.0 ||
+if [[ $(plutil -extract CFBundleShortVersionString raw -o - "$info_plist") != 0.2.0 ||
   ! $(plutil -extract ShitateCommit raw -o - "$info_plist") =~ ^[0-9a-f]{40}$ ]]; then
   printf 'release version or commit metadata is invalid\n' >&2
   exit 1

@@ -50,7 +50,7 @@ struct DiagnosticsView: View {
                 }
                 GridRow {
                     Text("Output").foregroundStyle(.secondary)
-                    Text("BlackHole 2ch")
+                    Text(model.activeOutputName)
                 }
                 GridRow {
                     Text("Format").foregroundStyle(.secondary)

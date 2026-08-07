@@ -17,6 +17,7 @@ shitate::AudioDeviceInfo inputDevice(std::string uid, std::string name = "USB Mi
         .minimumBufferFrames = 64,
         .maximumBufferFrames = 1024,
         .alive = true,
+        .physical = true,
     };
 }
 
@@ -30,6 +31,21 @@ shitate::AudioDeviceInfo blackHole(std::string uid) {
         .minimumBufferFrames = 64,
         .maximumBufferFrames = 1024,
         .alive = true,
+        .physical = false,
+    };
+}
+
+shitate::AudioDeviceInfo systemOutput(std::string uid) {
+    return {
+        .uid = std::move(uid),
+        .displayName = "MacBook Pro Speakers",
+        .outputChannelNames = {"Left", "Right"},
+        .sampleRates = {44100.0, 48000.0},
+        .allowedBufferFrames = {128, 256, 512},
+        .minimumBufferFrames = 32,
+        .maximumBufferFrames = 1024,
+        .alive = true,
+        .physical = true,
     };
 }
 
@@ -42,6 +58,13 @@ shitate::AudioConfiguration validConfiguration() {
         .sampleRate = 48000.0,
         .bufferFrames = 256,
     };
+}
+
+shitate::AudioConfiguration validPreviewConfiguration() {
+    auto configuration = validConfiguration();
+    configuration.outputTarget = shitate::AudioOutputTarget::systemPreview;
+    configuration.outputDeviceUID = "speakers-a";
+    return configuration;
 }
 
 class DeviceServiceTest final : public juce::UnitTest {
@@ -111,6 +134,80 @@ class DeviceServiceTest final : public juce::UnitTest {
         deadBlackHole[1].alive = false;
         expect(shitate::DeviceService::validateConfiguration(validConfiguration(), deadBlackHole)
                    .code == shitate::AudioErrorCode::blackHoleMissing);
+
+        auto wrongSavedBlackHole = validConfiguration();
+        wrongSavedBlackHole.blackHoleDeviceUID = "blackhole-b";
+        expect(shitate::DeviceService::validateConfiguration(wrongSavedBlackHole, devices).code ==
+               shitate::AudioErrorCode::blackHoleMissing);
+
+        auto spoofedBlackHoleUID = validConfiguration();
+        spoofedBlackHoleUID.blackHoleDeviceUID = "speakers-a";
+        const std::vector spoofedDevices{inputDevice("input-a"), blackHole("blackhole-a"),
+                                         systemOutput("speakers-a")};
+        expect(shitate::DeviceService::validateConfiguration(spoofedBlackHoleUID, spoofedDevices)
+                   .code == shitate::AudioErrorCode::blackHoleMissing);
+
+        beginTest("preview accepts only the exact physical macOS default output");
+        const std::vector previewDevices{inputDevice("input-a"), blackHole("blackhole-a"),
+                                         systemOutput("speakers-a")};
+        expect(shitate::DeviceService::validateConfiguration(validPreviewConfiguration(),
+                                                             previewDevices, "speakers-a")
+                   .succeeded());
+        expect(shitate::DeviceService::validateConfiguration(validPreviewConfiguration(),
+                                                             previewDevices, "speakers-b")
+                   .code == shitate::AudioErrorCode::previewOutputChanged);
+        expect(shitate::DeviceService::validateConfiguration(validPreviewConfiguration(),
+                                                             previewDevices)
+                   .code == shitate::AudioErrorCode::previewOutputUnavailable);
+
+        beginTest("preview rejects BlackHole, aggregate, dead, mono, and incompatible outputs");
+        auto previewToBlackHole = validPreviewConfiguration();
+        previewToBlackHole.outputDeviceUID = "blackhole-a";
+        expect(shitate::DeviceService::validateConfiguration(previewToBlackHole, previewDevices,
+                                                             "blackhole-a")
+                   .code == shitate::AudioErrorCode::previewOutputUnavailable);
+
+        auto aggregateOutput = previewDevices;
+        aggregateOutput[2].aggregate = true;
+        expect(shitate::DeviceService::validateConfiguration(validPreviewConfiguration(),
+                                                             aggregateOutput, "speakers-a")
+                   .code == shitate::AudioErrorCode::previewOutputUnavailable);
+
+        auto virtualOutput = previewDevices;
+        virtualOutput[2].physical = false;
+        expect(shitate::DeviceService::validateConfiguration(validPreviewConfiguration(),
+                                                             virtualOutput, "speakers-a")
+                   .code == shitate::AudioErrorCode::previewOutputUnavailable);
+
+        auto deadOutput = previewDevices;
+        deadOutput[2].alive = false;
+        expect(shitate::DeviceService::validateConfiguration(validPreviewConfiguration(),
+                                                             deadOutput, "speakers-a")
+                   .code == shitate::AudioErrorCode::previewOutputUnavailable);
+
+        auto monoOutput = previewDevices;
+        monoOutput[2].outputChannelNames = {"Mono"};
+        expect(shitate::DeviceService::validateConfiguration(validPreviewConfiguration(),
+                                                             monoOutput, "speakers-a")
+                   .code == shitate::AudioErrorCode::previewOutputUnavailable);
+
+        auto wrongRate = previewDevices;
+        wrongRate[2].sampleRates = {44100.0};
+        expect(shitate::DeviceService::validateConfiguration(validPreviewConfiguration(), wrongRate,
+                                                             "speakers-a")
+                   .code == shitate::AudioErrorCode::unsupportedSampleRate);
+
+        auto wrongBuffer = previewDevices;
+        wrongBuffer[2].allowedBufferFrames = {128};
+        expect(shitate::DeviceService::validateConfiguration(validPreviewConfiguration(),
+                                                             wrongBuffer, "speakers-a")
+                   .code == shitate::AudioErrorCode::unsupportedBufferSize);
+
+        auto manualPreview = validPreviewConfiguration();
+        manualPreview.mode = shitate::RoutingMode::manualAggregate;
+        expect(shitate::DeviceService::validateConfiguration(manualPreview, previewDevices,
+                                                             "speakers-a")
+                   .code == shitate::AudioErrorCode::invalidConfiguration);
 
         beginTest("manual mode requires one explicit aggregate and channel offsets");
         auto aggregate = inputDevice("aggregate");

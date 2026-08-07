@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <optional>
 #include <string_view>
 #include <thread>
 
@@ -17,6 +18,11 @@ constexpr int skipped = 77;
 
 bool enabled() {
     const auto* value = std::getenv("SHITATE_RUN_AUDIO_HARDWARE_TESTS");
+    return value != nullptr && std::string_view(value) == "1";
+}
+
+bool previewEnabled() {
+    const auto* value = std::getenv("SHITATE_TEST_PREVIEW");
     return value != nullptr && std::string_view(value) == "1";
 }
 
@@ -32,7 +38,7 @@ findUniquePhysicalInputByName(const std::vector<shitate::AudioDeviceInfo>& devic
                               std::string_view name) {
     const shitate::AudioDeviceInfo* result = nullptr;
     for (const auto& device : devices) {
-        if (!device.alive || !device.hasInputs() || device.aggregate ||
+        if (!device.alive || !device.hasInputs() || device.aggregate || !device.physical ||
             device.displayName != name) {
             continue;
         }
@@ -108,8 +114,9 @@ int main() {
     const auto* input = inputUID != nullptr && !std::string_view(inputUID).empty()
                             ? findByUID(devices, inputUID)
                             : findUniquePhysicalInputByName(devices, inputName);
-    const auto* output = findBlackHole(devices);
-    if (input == nullptr || !input->hasInputs() || input->aggregate) {
+    const auto* blackHole = findBlackHole(devices);
+    if (input == nullptr || !input->alive || !input->hasInputs() || input->aggregate ||
+        !input->physical) {
         const auto requestedName =
             inputName == nullptr ? std::string_view{} : std::string_view(inputName);
         const auto matchingNames =
@@ -118,17 +125,27 @@ int main() {
         const auto matchingPhysicalInputs =
             std::count_if(devices.begin(), devices.end(), [&](const auto& device) {
                 return device.displayName == requestedName && device.alive && device.hasInputs() &&
-                       !device.aggregate;
+                       !device.aggregate && device.physical;
             });
         std::cerr << "SKIP: requested physical input is unavailable; nameMatches=" << matchingNames
                   << " usableMatches=" << matchingPhysicalInputs << '\n';
         return skipped;
     }
-    if (output == nullptr) {
+    if (blackHole == nullptr) {
         std::cerr << "SKIP: BlackHole 2ch is unavailable\n";
         return skipped;
     }
 
+    const auto preview = previewEnabled();
+    const auto defaultOutput =
+        preview ? controller.defaultOutputDevice() : std::optional<shitate::AudioDeviceInfo>{};
+    const auto* output = preview && defaultOutput.has_value() ? &*defaultOutput : blackHole;
+    if (preview &&
+        (!defaultOutput.has_value() || !output->alive || !output->physical || output->aggregate ||
+         output->outputChannelNames.size() < 2 || output->uid == blackHole->uid)) {
+        std::cerr << "SKIP: the current macOS default output is not a supported Preview target\n";
+        return skipped;
+    }
     const auto requestedBufferFrames = requestedBuffer();
     if (requestedBufferFrames < 0) {
         std::cerr << "FAIL: SHITATE_TEST_BUFFER_FRAMES must be 128, 256, or 512\n";
@@ -137,7 +154,7 @@ int main() {
     const auto bufferFrames =
         requestedBufferFrames == 0 ? preferredBuffer(*input, *output) : requestedBufferFrames;
     if (bufferFrames == 0) {
-        std::cerr << "SKIP: input and BlackHole have no shared allowed buffer\n";
+        std::cerr << "SKIP: input and selected output have no shared allowed buffer\n";
         return skipped;
     }
     if (std::find(input->allowedBufferFrames.begin(), input->allowedBufferFrames.end(),
@@ -149,9 +166,11 @@ int main() {
     }
 
     const shitate::AudioConfiguration configuration{
+        .outputTarget = preview ? shitate::AudioOutputTarget::systemPreview
+                                : shitate::AudioOutputTarget::blackHole,
         .inputDeviceUID = input->uid,
         .outputDeviceUID = output->uid,
-        .blackHoleDeviceUID = output->uid,
+        .blackHoleDeviceUID = blackHole->uid,
         .inputChannelIndex = 0,
         .sampleRate = shitate::requiredSampleRate,
         .bufferFrames = bufferFrames,
@@ -177,6 +196,9 @@ int main() {
         return 1;
     }
 
+    if (preview) {
+        controller.setMasterMuted(true);
+    }
     if (const auto result = controller.start(); !result.succeeded()) {
         std::cerr << "FAIL: hardware routing start failed with code "
                   << static_cast<int>(result.code) << '\n';
@@ -184,22 +206,25 @@ int main() {
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
     const auto diagnostics = controller.diagnostics();
+    std::cout << "target=" << (preview ? "preview" : "blackhole") << " masterMuted=" << preview
+              << " sampleRate=" << diagnostics.sampleRate
+              << " bufferFrames=" << diagnostics.bufferFrames
+              << " inputLatencySamples=" << diagnostics.inputLatencySamples
+              << " outputLatencySamples=" << diagnostics.outputLatencySamples
+              << " xruns=" << diagnostics.xrunCount << '\n';
+    if (diagnostics.sampleRate != shitate::requiredSampleRate ||
+        diagnostics.bufferFrames != bufferFrames || diagnostics.xrunCount != 0) {
+        controller.failClosed();
+        std::cerr << "FAIL: CoreAudio did not preserve the requested short-run contract\n";
+        return 1;
+    }
+
     controller.stop();
     std::this_thread::sleep_for(std::chrono::milliseconds(60));
     shitate::CoreEvent event;
     while (controller.popEvent(event)) {
     }
 
-    std::cout << "sampleRate=" << diagnostics.sampleRate
-              << " bufferFrames=" << diagnostics.bufferFrames
-              << " inputLatencySamples=" << diagnostics.inputLatencySamples
-              << " outputLatencySamples=" << diagnostics.outputLatencySamples
-              << " xruns=" << diagnostics.xrunCount << '\n';
-    if (diagnostics.sampleRate != shitate::requiredSampleRate ||
-        diagnostics.bufferFrames != bufferFrames) {
-        std::cerr << "FAIL: CoreAudio did not preserve the requested format\n";
-        return 1;
-    }
     if (controller.status() != shitate::EngineStatus::configured) {
         std::cerr << "FAIL: asynchronous stop did not complete\n";
         return 1;

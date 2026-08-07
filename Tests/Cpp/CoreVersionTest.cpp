@@ -13,7 +13,7 @@ class CoreVersionTest final : public juce::UnitTest {
 
     void runTest() override {
         beginTest("returns the repository display version");
-        expect(shitate::ApplicationCore::displayVersion() == "0.1.0-dev");
+        expect(shitate::ApplicationCore::displayVersion() == "0.2.0-dev");
     }
 };
 

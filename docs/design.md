@@ -14,23 +14,23 @@
 | Field | Value |
 |---|---|
 | Document | Shi-tate Detailed Design |
-| Document version | 1.0.0 |
+| Document version | 1.1.0 |
 | Created | 2026-08-06 |
-| Target release | Shi-tate v0.1.0 |
-| Status | Ready for implementation |
+| Target release | Shi-tate v0.2.0 |
+| Status | Implementation and manual verification in progress |
 | Product name | **Shi-tate** |
 | Canonical code name | **Shitate** |
 | Japanese name | **仕立て** |
 | Repository | `hokupod/shitate` |
 | License | `AGPL-3.0-only` |
 
-This document fixes the decisions required for the MVP so implementation does
-not branch on unresolved product choices. Anything explicitly described as a
-future capability is excluded from v0.1.0.
+This document fixes the v0.1 MVP decisions plus the v0.2 exclusive main-output
+Preview. Anything explicitly described as a future capability remains excluded
+from v0.2.0.
 
 ### 0.1 Normative language
 
-- **MUST** indicates a v0.1.0 completion requirement.
+- **MUST** indicates a v0.2.0 completion requirement.
 - **SHOULD** indicates the normal implementation. An omission requires a
   documented ADR.
 - **MAY** indicates an optional capability that is not a completion gate.
@@ -91,7 +91,7 @@ purpose. Shi-tate lets you tailor your microphone signal before it reaches the c
 
 ## 2. Goals and non-goals
 
-### 2.1 v0.1.0 goals
+### 2.1 v0.2.0 goals
 
 1. Select one channel from a physical microphone on an Apple Silicon Mac.
 2. Convert the selected mono signal to stereo dual mono.
@@ -106,8 +106,10 @@ purpose. Shi-tate lets you tailor your microphone signal before it reaches the c
 9. Require no administrator privilege, shell execution, bundled custom driver,
    audio recording, or telemetry.
 10. Support source and binary distribution under AGPLv3 obligations.
+11. Let the user explicitly preview the processed signal on the current physical
+    macOS main output without also sending it to BlackHole.
 
-### 2.2 v0.1.0 non-goals
+### 2.2 v0.2.0 non-goals
 
 The following are not implemented:
 
@@ -121,7 +123,8 @@ The following are not implemented:
 - sidechain input;
 - MIDI input, MIDI effects, or software instruments;
 - 5.1, Atmos, or other multichannel layouts;
-- real-time headphone monitoring;
+- simultaneous BlackHole and main-output monitoring;
+- preview output selection, preview volume, or resampling;
 - recording, playback, or audio-file persistence;
 - plug-in purchasing, redistribution, or a marketplace;
 - an automatic updater;
@@ -147,10 +150,10 @@ The following are not implemented:
 | D-010 | Plug-in format | VST3 Audio Effect only |
 | D-011 | Chain | Serial 2-in/2-out, maximum eight slots |
 | D-012 | Scan isolation | One helper process per plug-in bundle |
-| D-013 | Runtime | VST3 runs in the main process in v0.1 |
+| D-013 | Runtime | VST3 runs in the main process in v0.2 |
 | D-014 | Virtual device | External BlackHole 2ch dependency |
 | D-015 | Standard format | 48,000 Hz, Float32, 256 frames |
-| D-016 | Resampling | None in v0.1; a device without 48 kHz cannot start |
+| D-016 | Resampling | None in v0.2; a device without 48 kHz cannot start |
 | D-017 | Clocking | JUCE 9 private aggregate device is the primary mode |
 | D-018 | Failure | Fail closed; no implicit device fallback |
 | D-019 | Persistence | Swift JSON plus VST3 state binary; never persist audio |
@@ -159,6 +162,7 @@ The following are not implemented:
 | D-022 | Updates | Manual GitHub Releases download; no in-app updater |
 | D-023 | App networking | None |
 | D-024 | Start at launch | Off by default; only an explicit user preference can enable it |
+| D-025 | Preview | Explicit, exclusive, non-persisted current-main-output route in Automatic mode only |
 
 JUCE is pinned to exactly:
 
@@ -330,7 +334,7 @@ JUCE_USE_CAMERA=0
 ### 6.3 Swift and C++ boundary
 
 Although modern Swift supports C++ interoperability, JUCE makes extensive use
-of templates, virtual classes, reference types, and nontrivial ownership. v0.1
+of templates, virtual classes, reference types, and nontrivial ownership. v0.2
 does not expose JUCE directly to Swift.
 
 Swift-visible values are limited to Foundation-compatible types:
@@ -379,7 +383,7 @@ and returns metadata. It never opens an audio device or UI.
 
 ### 7.3 Runtime isolation
 
-v0.1 runs VST3 in the main process for latency and implementation scope.
+v0.2 runs VST3 in the main process for latency and implementation scope.
 Known limits:
 
 - an access violation can terminate the app;
@@ -476,7 +480,9 @@ flowchart LR
     S8 --> Safety[OutputSafetyProcessor]
     Safety --> Master[MasterOutputStage]
     Master --> OutMeter[Output Meter]
-    OutMeter --> BH[BlackHole ch 1/2]
+    OutMeter --> Target{Explicit output target}
+    Target --> BH[BlackHole ch 1/2]
+    Target --> Preview[Current physical main output ch 1/2]
 ```
 
 `OutputSafetyProcessor` owns only finite-value replacement, denormal flushing,
@@ -492,6 +498,8 @@ notifications, private aggregate lifecycle, xrun count, and actual format.
 
 - Input is one user-selected channel on a physical microphone.
 - Output defaults to a device named `BlackHole 2ch`.
+- Preview snapshots the current macOS default-output UID and accepts only a live,
+  physical, non-aggregate output with at least two channels.
 - Persistence and comparison use CoreAudio UID, never display name.
 - Equal names with different UIDs are different devices.
 
@@ -509,6 +517,22 @@ Drift-compensated device: Physical microphone
 
 BlackHole provides the output clock; drift compensation handles the independent
 physical input clock. Shipped configurations MUST create a private aggregate.
+
+### 9.4.1 System-output Preview
+
+Preview is an alternate `AudioOutputTarget`, not an additional monitor bus. It
+is available only in Automatic Private Aggregate mode. Start Preview captures
+the prior running/muted state, fades and stops BlackHole, re-reads the current
+default-output UID, and creates the same private aggregate with the physical
+output as clock and the selected microphone drift-compensated. The core
+revalidates the UID immediately before publishing the configuration.
+
+Stop Preview fades and stops, restores the exact BlackHole configuration, and
+restarts only when routing was active before Preview, with the same mute state.
+Preview state and output identity are never persisted. Default-output change or
+disconnection revokes callback output immediately and reports a Preview-specific
+error; it never follows the new output. Errors, sleep, permission loss, and quit
+discard the return context and leave audio stopped.
 
 ### 9.5 Manual aggregate fallback
 
@@ -540,10 +564,10 @@ Rules:
 5. Split callbacks of 513–1024 frames into consecutive chunks no larger than
    512 while preserving meter, plug-in, and ramp continuity.
 6. Silence callbacks over 1024 frames and request control-thread recovery.
-7. v0.1 does not resample. Devices that cannot run at 48 kHz are unsupported.
+7. v0.2 does not resample. Devices that cannot run at 48 kHz are unsupported.
 
 AirPods and other microphones that cannot operate at 48 kHz are outside the
-official v0.1 compatibility matrix.
+official v0.2 compatibility matrix.
 
 ### 9.7 AudioEngine
 
@@ -585,7 +609,7 @@ signal can reach output.
 9. Run `OutputSafetyProcessor`.
 10. Run `MasterOutputStage` once.
 11. Update the output meter.
-12. Copy to BlackHole output channels 1 and 2.
+12. Copy to channels 1 and 2 of the validated explicit output target.
 13. Update callback-time EMA.
 
 ### 9.9 Real-time prohibitions
@@ -608,7 +632,7 @@ public:
 ```
 
 Output is always two channels. Both receive the same sample. Null input becomes
-silence. Input gain is fixed at 0 dB in v0.1.
+silence. Input gain is fixed at 0 dB in v0.2.
 
 ### 9.11 PluginChain
 
@@ -702,7 +726,7 @@ struct MeterSnapshot {
 
 ### 10.1 Requirements
 
-A loadable v0.1 VST3 must be a macOS `.vst3` bundle; arm64 or Universal; an
+A loadable v0.2 VST3 must be a macOS `.vst3` bundle; arm64 or Universal; an
 Audio Effect; exactly 2-in/2-out on the main bus; 48 kHz capable; prepare with a
 maximum block of 512; operate without sidechain; pass scanner silence/impulse,
 timeout, crash, and non-finite checks; and satisfy signature policy.
@@ -769,7 +793,7 @@ checks are mandatory.
 ### 11.1 Execution model
 
 - Spawn one process for one plug-in bundle; never use a persistent scanner.
-- Use shell-free `posix_spawn` with argument arrays. The approved v0.1
+- Use shell-free `posix_spawn` with argument arrays. The approved v0.2
   implementation does not use `juce::ChildProcess`.
 - Pass only `--request <request-json-path>` in argv, never the plug-in path.
 - The parent owns PID lifecycle, timeout, termination, and exit classification.
@@ -918,7 +942,7 @@ not automatically persisted.
 ### 12.3 Chain editing
 
 Add, remove, and move perform: 10 ms fade-out → stop → save current state →
-mutate → prepare every slot → start → 10 ms fade-in. v0.1 has no running hot
+mutate → prepare every slot → start → 10 ms fade-in. v0.2 has no running hot
 swap. A failed mutation leaves routing stopped and preserves the last valid
 session description.
 
@@ -971,6 +995,11 @@ NS_ASSUME_NONNULL_BEGIN
 @class STAudioDeviceInfo;
 @class STMeterSnapshot;
 
+typedef NS_ENUM(NSInteger, STAudioOutputTarget) {
+    STAudioOutputTargetBlackHole = 0,
+    STAudioOutputTargetSystemPreview = 1,
+};
+
 @protocol STAudioEngineBridgeDelegate <NSObject>
 - (void)audioEngineBridge:(STAudioEngineBridge *)bridge
             didChangeState:(NSInteger)state;
@@ -984,11 +1013,15 @@ NS_ASSUME_NONNULL_BEGIN
 @interface STAudioEngineBridge : NSObject
 @property (nonatomic, weak, nullable) id<STAudioEngineBridgeDelegate> delegate;
 - (instancetype)init NS_DESIGNATED_INITIALIZER;
-- (NSArray<STAudioDeviceInfo *> *)inputDevices;
-- (NSArray<STAudioDeviceInfo *> *)outputDevices;
+- (NSArray<STAudioDeviceInfo *> *)audioDevices;
+- (nullable STAudioDeviceInfo *)defaultOutputDevice;
 - (BOOL)configureInputDeviceUID:(NSString *)inputUID
                    channelIndex:(NSInteger)channelIndex
                 outputDeviceUID:(NSString *)outputUID
+             blackHoleDeviceUID:(NSString *)blackHoleUID
+                           mode:(STAudioRoutingMode)mode
+                   outputTarget:(STAudioOutputTarget)outputTarget
+       manualOutputChannelStart:(NSInteger)manualOutputChannelStart
                      sampleRate:(double)sampleRate
                    bufferFrames:(NSInteger)bufferFrames
                           error:(NSError **)error;
@@ -1037,12 +1070,16 @@ final class AppModel: NSObject {
     var state: ApplicationState = .booting
     var inputDevices: [AudioDevice] = []
     var outputDevices: [AudioDevice] = []
+    var defaultOutputDevice: AudioDevice?
+    var previewSession: PreviewSessionState = .inactive
     var slots: [PluginSlot] = []
     var meters: MeterSnapshot = .silence
     var isMuted = false
     func bootstrap() async
     func startRouting() async
     func stopRouting() async
+    func startPreview()
+    func stopPreview()
     func toggleMute()
     func rescanPlugins() async
     func saveSession() async
@@ -1050,7 +1087,9 @@ final class AppModel: NSObject {
 ```
 
 `AppModel` owns bridge/services and is the authoritative UI model. Each bridge
-callback hops to `MainActor` exactly once.
+callback hops to `MainActor` exactly once. `PreviewSessionState` is transient
+and carries only the current output plus `wasRouting`/`wasMuted` return context;
+it is not part of persisted settings or sessions.
 
 ### 13.7 Meter polling
 
@@ -1110,7 +1149,9 @@ pane, restores the last pane, and does not duplicate task-specific controls.
 
 Show routing status, selected input/channel/output, actual sample rate and
 buffer, host and plug-in latency separately, xrun count, input/output meters,
-master mute, start/stop, and bypass-all.
+master mute, start/stop, exclusive Start/Stop Preview, feedback warning, actual
+Preview output name, and bypass-all. Manual Aggregate mode shows the reason
+Preview is unavailable.
 
 #### Chain
 
@@ -1163,9 +1204,11 @@ plug-ins is a valid passthrough onboarding path.
 ### 14.4 Menu bar
 
 Use familiar SF Symbols for stopped, running, muted, warning, and fatal states.
-The menu contains Open Shi-tate, Start/Stop Routing, Mute/Unmute, current input,
-BlackHole output, recent error if any, Settings, About, and Quit. Commands must
-also be available in standard app menus where macOS users expect them.
+The menu contains Open Shi-tate, Start/Stop Routing (or Stop Preview while
+previewing), Mute/Unmute, current input, actual output name, recent error if any,
+Settings, About, and Quit. It never labels a Preview output as BlackHole.
+Commands must also be available in standard app menus where macOS users expect
+them.
 
 | State | Symbol |
 |---|---|
@@ -1395,6 +1438,13 @@ and every condition succeeds. The default is `false`.
 Stop, enter `needsMicrophonePermission`, offer the System Settings microphone
 pane, and do not repeatedly prompt without user action.
 
+### 17.8 Preview default-output change
+
+Do not follow a changed default output. Prevent any further callback commit,
+fade/stop, discard the saved Preview return context, show
+`previewOutputChanged`, and require a new explicit Preview start. No automatic
+BlackHole restart occurs on this failure path.
+
 ---
 
 ## 18. Security design
@@ -1422,7 +1472,7 @@ automatic data transmission.
 
 ### 18.3 App Sandbox
 
-v0.1 does not use App Sandbox because common VST3 may access license files,
+v0.2 does not use App Sandbox because common VST3 may access license files,
 presets, and external content. Hardened Runtime, Developer ID, notarization, and
 host-side validation provide the documented alternative boundary.
 
@@ -1512,7 +1562,7 @@ format/xrun, plug-in display metadata and truncated fingerprints/status, and
 last error. Never send or automatically persist the copied report.
 
 ```text
-Shi-tate 0.1.0 (commit abcdef...)
+Shi-tate 0.2.0 (commit abcdef...)
 macOS 26.5 / arm64
 JUCE 9.0.0
 State: stopped
@@ -1607,12 +1657,12 @@ Sources/Scanner/ScanResultWriter.cpp
 ### 21.1 CMake and Nix policy
 
 CMake is the only project source of truth; do not commit a hand-edited
-`.xcodeproj`. `project(VERSION)` is numeric `0.1.0`; the display version comes
-from `VERSION` and is `0.1.0-dev` until release.
+`.xcodeproj`. `project(VERSION)` is numeric `0.2.0`; the display version comes
+from `VERSION` and is `0.2.0-dev` until release.
 
 ```cmake
 cmake_minimum_required(VERSION 3.31)
-project(Shitate VERSION 0.1.0 LANGUAGES C CXX OBJC OBJCXX Swift)
+project(Shitate VERSION 0.2.0 LANGUAGES C CXX OBJC OBJCXX Swift)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0")
@@ -2128,7 +2178,7 @@ safe mode before any VST3 load.
 
 ---
 
-## 28. v0.1.0 completion checklist
+## 28. v0.2.0 completion checklist
 
 ### Functionality
 
@@ -2138,12 +2188,17 @@ safe mode before any VST3 load.
 - [ ] Hosts up to eight serial VST3 and opens native editors.
 - [ ] Supports bypass, remove, reorder, session and state restore.
 - [ ] Provides global mute and menu-bar residency.
+- [ ] Explicit Preview routes only to the validated current physical main output
+  in Automatic mode and restores prior BlackHole running/muted state only after
+  explicit Stop Preview.
 
 ### Reliability
 
 - [ ] Scanner crash/hang is isolated and reaped.
 - [ ] Runtime NaN/Inf never reaches BlackHole.
 - [ ] Device loss never selects another device.
+- [ ] Preview output change immediately silences and stops without following,
+  restoring, or automatically restarting either output.
 - [ ] Sleep stops routing; wake resume is explicit and fully revalidated.
 - [ ] Dirty shutdown starts safe mode before plug-in load.
 - [ ] Two-hour hardware run has xrun 0 when manual evidence is available.
@@ -2164,13 +2219,13 @@ safe mode before any VST3 load.
 
 ---
 
-## 29. Candidates after v0.1 (`v0.2` and later)
+## 29. Candidates after v0.2
 
-Prioritization depends on v0.1 use: mono VST3 adapter; AU/CLAP; XPC runtime
-isolation; Rosetta/Intel bridge; headphone monitoring; built-in expander/
-limiter; multiple sessions; preset import/export; quick parameters; end-to-end
-latency measurement; resampling; plug-in health score; and only as a last
-resort, a native virtual audio driver.
+Prioritization depends on v0.2 use: mono VST3 adapter; AU/CLAP; XPC runtime
+isolation; Rosetta/Intel bridge; simultaneous monitoring; selectable Preview
+output/volume; built-in expander/limiter; multiple sessions; preset
+import/export; quick parameters; end-to-end latency measurement; resampling;
+plug-in health score; and only as a last resort, a native virtual audio driver.
 
 ---
 
@@ -2209,7 +2264,7 @@ Checked on 2026-08-06:
 
 ## 32. Final summary
 
-Shi-tate v0.1.0 keeps these boundaries explicit:
+Shi-tate v0.2.0 keeps these boundaries explicit:
 
 ```text
 SwiftUI                     product UI, state, persistence
@@ -2217,6 +2272,7 @@ Objective-C++ Bridge        stable language boundary
 JUCE / C++                  CoreAudio, real-time processing, VST3
 Scanner Helper              scan-time crash/hang isolation
 BlackHole                   external virtual audio device
+macOS main output           explicit exclusive Preview destination
 Third-party VST3            user-selected untrusted native code
 ```
 

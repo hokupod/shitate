@@ -23,6 +23,8 @@ typedef NS_ERROR_ENUM(STBridgeErrorDomain, STBridgeErrorCode){
     STBridgeErrorCodeEngineXRun = 108,
     STBridgeErrorCodeInvalidConfiguration = 109,
     STBridgeErrorCodeCallbackLayoutInvalid = 110,
+    STBridgeErrorCodePreviewOutputUnavailable = 111,
+    STBridgeErrorCodePreviewOutputChanged = 112,
     STBridgeErrorCodeInvalidPluginPath = 200,
     STBridgeErrorCodePluginSignatureRejected = 201,
     STBridgeErrorCodePluginScanFailed = 202,
@@ -74,11 +76,22 @@ typedef void (^STPluginStateCompletion)(NSData* _Nullable state, NSError* _Nulla
 - (NSArray<STAudioDeviceInfo*>*)inputDevices;
 - (NSArray<STAudioDeviceInfo*>*)outputDevices;
 - (NSArray<STAudioDeviceInfo*>*)audioDevices;
+- (nullable STAudioDeviceInfo*)defaultOutputDevice;
 - (BOOL)configureInputDeviceUID:(NSString*)inputUID
                    channelIndex:(NSInteger)channelIndex
                 outputDeviceUID:(NSString*)outputUID
              blackHoleDeviceUID:(NSString*)blackHoleUID
                            mode:(STAudioRoutingMode)mode
+       manualOutputChannelStart:(NSInteger)manualOutputChannelStart
+                     sampleRate:(double)sampleRate
+                   bufferFrames:(NSInteger)bufferFrames
+                          error:(NSError* _Nullable* _Nullable)error;
+- (BOOL)configureInputDeviceUID:(NSString*)inputUID
+                   channelIndex:(NSInteger)channelIndex
+                outputDeviceUID:(NSString*)outputUID
+             blackHoleDeviceUID:(NSString*)blackHoleUID
+                           mode:(STAudioRoutingMode)mode
+                   outputTarget:(STAudioOutputTarget)outputTarget
        manualOutputChannelStart:(NSInteger)manualOutputChannelStart
                      sampleRate:(double)sampleRate
                    bufferFrames:(NSInteger)bufferFrames

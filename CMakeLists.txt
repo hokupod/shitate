@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.31)
 
 set(CMAKE_OSX_SYSROOT "macosx" CACHE STRING "macOS SDK" FORCE)
-project(Shitate VERSION 0.1.0 LANGUAGES C CXX OBJC OBJCXX Swift)
+project(Shitate VERSION 0.2.0 LANGUAGES C CXX OBJC OBJCXX Swift)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(CTest)
@@ -13,7 +13,7 @@ include(ShitateCompiler)
 include(ShitateVersion)
 
 if(NOT APPLE)
-  message(FATAL_ERROR "Shi-tate v0.1 supports macOS only")
+  message(FATAL_ERROR "Shi-tate v0.2 supports macOS only")
 endif()
 
 if(NOT CMAKE_GENERATOR STREQUAL "Xcode")

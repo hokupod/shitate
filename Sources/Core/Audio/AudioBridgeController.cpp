@@ -51,6 +51,10 @@ std::vector<AudioDeviceInfo> AudioBridgeController::enumerateDevices() {
     return impl_->deviceService.enumerateDevices();
 }
 
+std::optional<AudioDeviceInfo> AudioBridgeController::defaultOutputDevice() {
+    return impl_->deviceService.defaultOutputDevice();
+}
+
 AudioResult AudioBridgeController::configure(const AudioConfiguration& configuration) {
     return impl_->engine.configure(configuration);
 }

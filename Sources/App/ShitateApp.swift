@@ -31,10 +31,10 @@ struct ShitateApp: App {
 
         .commands {
             CommandMenu("Routing") {
-                Button(model.isRoutingActive ? "Stop Routing" : "Start Routing") {
-                    model.isRoutingActive ? model.stopRouting() : model.startRouting()
+                Button(model.primaryAudioActionTitle) {
+                    model.performPrimaryAudioAction()
                 }
-                .disabled(!model.isRoutingActive && !model.canStartRouting)
+                .disabled(model.primaryAudioActionDisabled)
                 Button(model.isMuted ? "Unmute" : "Mute") {
                     model.toggleMute()
                 }

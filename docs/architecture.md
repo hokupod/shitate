@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <!-- Copyright (C) 2026 Hokuto Takemiya -->
 
-# v0.1 architecture
+# v0.2 architecture
 
-This document describes the implemented `0.1.0-dev` architecture. The
+This document describes the implemented `0.2.0-dev` architecture. The
 [detailed design](design.md) remains canonical when this summary and the design
 disagree.
 
@@ -15,13 +15,15 @@ physical microphone
   → Shi-tate audio callback
   → 0–8 in-process VST3 Audio Effects
   → final non-finite/output-safety stage
-  → BlackHole 2ch as stereo dual mono
-  → user-selected communication application
+  ├→ BlackHole 2ch as stereo dual mono
+  │   → user-selected communication application
+  └→ current physical macOS main output as exclusive Preview
 ```
 
-Shi-tate never selects a communication application and never falls back to a
-speaker, another input, or another output. BlackHole and all user VST3 bundles
-are installed separately.
+Shi-tate never selects a communication application and never falls back to
+another input or output. The physical main output is used only after an explicit
+`Start Preview`; a default-output change stops Preview instead of following it.
+BlackHole and all user VST3 bundles are installed separately.
 
 ## Executable components
 
@@ -63,11 +65,33 @@ All device, plug-in-chain, persistence, diagnostics, and UI changes occur on
 the control/MainActor side while stopped or through an explicit stop–mutate–
 restart sequence. Each plug-in slot restores its input on exceptions or
 non-finite output; the final output stage prevents NaN/Inf from reaching
-BlackHole.
+either BlackHole or Preview.
+
+## Preview lifecycle
+
+Preview reuses the same input mapper, serial VST3 chain, safety stage, meters,
+mute, and start/stop ramps. It is an exclusive alternate `AudioOutputTarget`,
+never a second callback output.
+
+1. Capture whether BlackHole routing is running and the current mute state.
+2. Fade and stop the current route, if running.
+3. Re-read the macOS default-output UID, require a live physical non-aggregate
+   stereo device at 48 kHz with a shared 128/256/512-frame buffer, then
+   create a private aggregate using that output as clock.
+4. Start Preview with the captured mute state.
+5. On explicit `Stop Preview`, fade and stop, restore the validated BlackHole
+   configuration, and restart only if step 1 captured an active route.
+
+Manual Aggregate mode cannot start Preview. Preview state and its output UID are
+not persisted. Output change/disconnection, sleep, permission loss, error, or
+termination cancels the return context and leaves audio stopped; wake and launch
+never restore Preview.
 
 ## Device and workspace recovery
 
 - Missing microphone or BlackHole: mute, stop, block, and select no fallback.
+- Preview output change or disconnection: immediately prevent callback commit,
+  mute/stop, report a Preview-specific error, and require a new explicit start.
 - Unsupported sample rate or buffer: stop and perform at most one automatic
   reset before requiring manual resolution.
 - Sleep: always stop.
@@ -113,7 +137,7 @@ tree bootstraps, builds, and tests without Git metadata or dependency download.
 
 ## Non-goals and residual risk
 
-v0.1 does not isolate runtime VST3. A trusted-signature check identifies code;
+v0.2 does not isolate runtime VST3. A trusted-signature check identifies code;
 it does not make that code safe. A loaded plug-in can crash or hang the app and,
 because App Sandbox and Library Validation are disabled for compatibility, can
 access resources available to the user. Safe mode reduces repeat-crash impact

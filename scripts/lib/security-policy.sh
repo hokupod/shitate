@@ -48,7 +48,7 @@ shitate_verify_entitlement_files() {
   fi
   if shitate_plist_true "$app_entitlements" com.apple.security.app-sandbox ||
     shitate_plist_true "$helper_entitlements" com.apple.security.app-sandbox; then
-    printf 'App Sandbox is outside the documented v0.1 boundary\n' >&2
+    printf 'App Sandbox is outside the documented v0.2 boundary\n' >&2
     return 1
   fi
 

@@ -21,7 +21,7 @@ No response or remediation SLA is promised while the project is pre-alpha.
 ## Security boundary
 
 Shi-tate treats third-party VST3 bundles as untrusted native code. Scan-time
-loading is isolated in `ShitatePluginScanner`, but v0.1 runtime plug-ins execute
+loading is isolated in `ShitatePluginScanner`, but v0.2 runtime plug-ins execute
 inside the main app after signature, architecture, layout, and fingerprint
 validation. A valid signature identifies code; it does not establish safe
 behavior. A plug-in can still crash, hang, access files, or use the network with
@@ -53,7 +53,7 @@ the draft release.
 App Sandbox is disabled and Library Validation is disabled only for the app and
 scanner because user VST3 bundles are loaded as native code. Hardened Runtime
 and release entitlement checks remain enabled, but these controls do not
-contain an in-process plug-in. See the detailed [v0.1 threat model](docs/threat-model.md)
+contain an in-process plug-in. See the detailed [v0.2 threat model](docs/threat-model.md)
 and [architecture](docs/architecture.md).
 
 ## Disclosure expectations

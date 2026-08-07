@@ -40,6 +40,47 @@ struct ApplicationStatePresentation: Equatable {
     let outputIsStopped: Bool
     let nextAction: String?
 
+    init(state: ApplicationState, previewSession: PreviewSessionState = .inactive) {
+        switch previewSession {
+        case .inactive:
+            self.init(state: state)
+        case .switchingToPreview(_, let output):
+            self.init(
+                title: "Starting Preview",
+                detail: "Shi-tate is switching exclusive output to \(output.name).",
+                symbol: "headphones",
+                outputIsStopped: state != .running && state != .muted,
+                nextAction: nil
+            )
+        case .active(_, let output):
+            if state == .muted {
+                self.init(
+                    title: "Preview Muted",
+                    detail: "Preview to \(output.name) is active, but master output is muted.",
+                    symbol: "speaker.slash",
+                    outputIsStopped: false,
+                    nextAction: "Unmute to hear the processed microphone."
+                )
+            } else {
+                self.init(
+                    title: "Previewing",
+                    detail: "The processed microphone is routed exclusively to \(output.name).",
+                    symbol: "headphones.circle.fill",
+                    outputIsStopped: state != .running,
+                    nextAction: nil
+                )
+            }
+        case .returning:
+            self.init(
+                title: "Stopping Preview",
+                detail: "Shi-tate is restoring the validated BlackHole route.",
+                symbol: "arrow.uturn.backward.circle",
+                outputIsStopped: state != .running && state != .muted,
+                nextAction: nil
+            )
+        }
+    }
+
     init(state: ApplicationState) {
         switch state {
         case .booting, .checkingEnvironment:
@@ -189,6 +230,104 @@ enum SessionWorkflowState: Equatable, Sendable {
     case complete
     case saving
     case incomplete(String)
+}
+
+struct PreviewReturnContext: Equatable, Sendable {
+    let wasRouting: Bool
+    let wasMuted: Bool
+}
+
+struct PreviewOutput: Equatable, Sendable {
+    let uid: String
+    let name: String
+}
+
+enum PreviewSessionState: Equatable, Sendable {
+    case inactive
+    case switchingToPreview(PreviewReturnContext, PreviewOutput)
+    case active(PreviewReturnContext, PreviewOutput)
+    case returning(PreviewReturnContext, PreviewOutput)
+
+    static func begin(
+        from state: ApplicationState,
+        isMuted: Bool,
+        output: PreviewOutput
+    ) -> PreviewSessionState? {
+        let wasRouting: Bool
+        switch state {
+        case .readyStopped:
+            wasRouting = false
+        case .running, .muted:
+            wasRouting = true
+        default:
+            return nil
+        }
+        return .switchingToPreview(
+            PreviewReturnContext(wasRouting: wasRouting, wasMuted: isMuted),
+            output
+        )
+    }
+
+    func markActive() -> PreviewSessionState? {
+        guard case .switchingToPreview(let context, let output) = self else {
+            return nil
+        }
+        return .active(context, output)
+    }
+
+    func beginReturn() -> PreviewSessionState? {
+        guard case .active(let context, let output) = self else {
+            return nil
+        }
+        return .returning(context, output)
+    }
+
+    func prepareRestart() -> PreviewSessionState? {
+        guard case .active(let context, let output) = self else {
+            return nil
+        }
+        return .switchingToPreview(context, output)
+    }
+
+    func failClosed() -> PreviewSessionState {
+        .inactive
+    }
+
+    var output: PreviewOutput? {
+        switch self {
+        case .inactive:
+            nil
+        case .switchingToPreview(_, let output), .active(_, let output),
+            .returning(_, let output):
+            output
+        }
+    }
+
+    var returnContext: PreviewReturnContext? {
+        switch self {
+        case .inactive:
+            nil
+        case .switchingToPreview(let context, _), .active(let context, _),
+            .returning(let context, _):
+            context
+        }
+    }
+
+    var isActive: Bool {
+        if case .active = self {
+            return true
+        }
+        return false
+    }
+
+    var isTransitioning: Bool {
+        switch self {
+        case .switchingToPreview, .returning:
+            true
+        case .inactive, .active:
+            false
+        }
+    }
 }
 
 enum EngineStatusEventMapper {

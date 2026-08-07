@@ -165,6 +165,7 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     var settings: SettingsDocument = .defaults
     var inputDevices: [AudioDevice] = []
     var outputDevices: [AudioDevice] = []
+    var defaultOutputDevice: AudioDevice?
     var selectedInputUID: String?
     var selectedInputChannel = 0
     var routingMode: AudioRoutingSelection = .automaticPrivateAggregate
@@ -194,6 +195,8 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     var additionalPluginFolders: [String] = []
     var onboardingError: String?
     var persistenceBlocksRouting = false
+    var previewSession: PreviewSessionState = .inactive
+    var configuredOutputTarget: STAudioOutputTarget?
 
     init(
         bridge: STAudioEngineBridge = STAudioEngineBridge(),
@@ -269,10 +272,76 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     }
 
     var canStartRouting: Bool {
-        state == .readyStopped
+        let requiredTarget: STAudioOutputTarget =
+            isPreviewSession ? .systemPreview : .blackHole
+        return state == .readyStopped
             && (sessionWorkflow == .complete || sessionWorkflow == .restoreSkipped
                 || ephemeralReducedChain)
             && !persistenceBlocksRouting
+            && configuredOutputTarget == requiredTarget
+    }
+
+    var canStartPreview: Bool {
+        previewSession == .inactive
+            && (state == .readyStopped || state == .running || state == .muted)
+            && (sessionWorkflow == .complete || sessionWorkflow == .restoreSkipped
+                || ephemeralReducedChain)
+            && pendingAudioOperation == nil
+            && operationAfterStop == nil
+            && !isPluginOperationInFlight
+            && !terminationIsPending
+            && !persistenceBlocksRouting
+            && configuredOutputTarget == .blackHole
+            && previewUnavailableReason == nil
+    }
+
+    var previewBufferFrames: Int? {
+        guard let output = defaultOutputDevice else {
+            return nil
+        }
+        return previewBufferFrames(for: output)
+    }
+
+    private func previewBufferFrames(for output: AudioDevice) -> Int? {
+        guard let input = selectedInput else {
+            return nil
+        }
+        return [bufferFrames, 256, 128, 512].first {
+            [128, 256, 512].contains($0)
+                && input.allowedBufferFrames.contains($0)
+                && output.allowedBufferFrames.contains($0)
+        }
+    }
+
+    var previewUnavailableReason: String? {
+        guard routingMode == .automaticPrivateAggregate else {
+            return "Preview is unavailable with Manual Aggregate routing."
+        }
+        guard let input = selectedInput, input.isAlive, !input.isAggregate, input.isPhysical else {
+            return "Select an available physical microphone before previewing."
+        }
+        guard let output = defaultOutputDevice else {
+            return "The macOS main output is unavailable."
+        }
+        guard output.isAlive, !output.isAggregate, output.isPhysical,
+            output.outputChannelNames.count >= 2
+        else {
+            return "Preview requires a live, physical stereo main output."
+        }
+        guard output.id != blackHoleUID,
+            output.displayName != AudioEnvironment.blackHoleDisplayName
+        else {
+            return "Choose speakers or headphones as the macOS main output instead of BlackHole."
+        }
+        guard input.sampleRates.contains(where: { abs($0 - 48_000) < 0.5 }),
+            output.sampleRates.contains(where: { abs($0 - 48_000) < 0.5 })
+        else {
+            return "The microphone and main output must both support 48 kHz."
+        }
+        guard previewBufferFrames != nil else {
+            return "The microphone and main output need a shared 128, 256, or 512-frame buffer."
+        }
+        return nil
     }
 
     var canEditPluginChain: Bool {
@@ -306,20 +375,43 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         state == .starting || state == .running || state == .muted || state == .stopping
     }
 
+    var isPreviewSession: Bool {
+        previewSession != .inactive
+    }
+
+    var isPreviewActive: Bool {
+        previewSession.isActive
+    }
+
+    var activeOutputDescription: String {
+        if let output = previewSession.output {
+            return "\(output.name) · Preview channels 1–2"
+        }
+        return "BlackHole 2ch · Channels 1–2"
+    }
+
+    var activeOutputName: String {
+        previewSession.output?.name ?? AudioEnvironment.blackHoleDisplayName
+    }
+
+    var activeOutputUID: String {
+        previewSession.output?.uid ?? blackHoleUID ?? settings.audio.outputDeviceUID
+    }
+
     var statusTitle: String {
-        ApplicationStatePresentation(state: state).title
+        statePresentation.title
     }
 
     var statusDetail: String {
-        ApplicationStatePresentation(state: state).detail
+        statePresentation.detail
     }
 
     var statusSymbol: String {
-        ApplicationStatePresentation(state: state).symbol
+        statePresentation.symbol
     }
 
     var statePresentation: ApplicationStatePresentation {
-        ApplicationStatePresentation(state: state)
+        ApplicationStatePresentation(state: state, previewSession: previewSession)
     }
 
     var hasMicrophonePermission: Bool {
@@ -432,6 +524,9 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
             settings.audio.outputDeviceUID = uid
             settings.audio.outputDeviceName = AudioEnvironment.blackHoleDisplayName
             persistSettings()
+            guard !persistenceBlocksRouting else {
+                return
+            }
         }
 
         guard permissionFlow.status == .authorized else {
@@ -473,6 +568,7 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
             return
         }
 
+        configuredOutputTarget = nil
         do {
             try bridge.configureInputDeviceUID(
                 values.inputUID,
@@ -480,12 +576,17 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
                 outputDeviceUID: values.outputUID,
                 blackHoleDeviceUID: values.blackHoleUID,
                 mode: routingMode.bridgeValue,
+                outputTarget: .blackHole,
                 manualOutputChannelStart: values.manualOutputChannelStart,
                 sampleRate: 48_000,
                 bufferFrames: bufferFrames
             )
+            configuredOutputTarget = .blackHole
             bridge.setMasterMuted(isMuted)
             persistConfiguration()
+            guard !persistenceBlocksRouting else {
+                return
+            }
             if !preserveDeviceRecoveryAttempt {
                 deviceRecoveryAttempted = false
             }
@@ -502,14 +603,25 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
             apply(.microphonePermissionLost)
             return
         }
+        let requiredTarget: STAudioOutputTarget =
+            isPreviewSession ? .systemPreview : .blackHole
+        guard configuredOutputTarget == requiredTarget else {
+            bridge.setMasterMuted(true)
+            bridge.stop()
+            configuredOutputTarget = nil
+            lastError = "Audio output must be configured again before routing can start."
+            apply(.audioConfigurationInvalid)
+            return
+        }
         let next = apply(.startRequested)
         guard next == .starting else {
             return
         }
-        guard recordRunOperation("startRouting", routingWasActive: true) else {
+        let operation = isPreviewSession ? "startPreview" : "startRouting"
+        guard recordRunOperation(operation, routingWasActive: true) else {
             return
         }
-        localLogService.log("routingStartRequested")
+        localLogService.log(isPreviewSession ? "previewStartRequested" : "routingStartRequested")
         do {
             try bridge.start()
         } catch {
@@ -523,9 +635,240 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         guard next != previous else {
             return
         }
-        _ = recordRunOperation("stopRouting", routingWasActive: false)
-        localLogService.log("routingStopRequested")
+        let operation = isPreviewSession ? "stopPreviewAudio" : "stopRouting"
+        _ = recordRunOperation(operation, routingWasActive: false)
+        localLogService.log(isPreviewSession ? "previewAudioStopRequested" : "routingStopRequested")
         bridge.stop()
+    }
+
+    func startPreview() {
+        guard canStartPreview, let target = defaultOutputDevice else {
+            if let reason = previewUnavailableReason {
+                lastError = reason
+            }
+            return
+        }
+
+        cancelStartRoutingAtLaunch()
+        let output = PreviewOutput(uid: target.id, name: target.displayName)
+        guard
+            let nextSession = PreviewSessionState.begin(
+                from: state,
+                isMuted: isMuted,
+                output: output
+            ), let context = nextSession.returnContext
+        else {
+            return
+        }
+        previewSession = nextSession
+        lastError = nil
+        localLogService.log("previewSwitchRequested", fields: ["output": output.name])
+
+        if context.wasRouting {
+            stopRouting()
+        } else {
+            configureAndStartPreview(context: context, output: output)
+        }
+    }
+
+    func stopPreview() {
+        guard let returningSession = previewSession.beginReturn(),
+            let context = returningSession.returnContext,
+            let output = returningSession.output,
+            state == .running || state == .muted,
+            !isPluginOperationInFlight,
+            pendingAudioOperation == nil,
+            operationAfterStop == nil
+        else {
+            return
+        }
+        previewSession = returningSession
+        localLogService.log("previewReturnRequested", fields: ["output": output.name])
+        if isRoutingActive {
+            stopRouting()
+        } else {
+            restoreBlackHoleAfterPreview(context: context)
+        }
+    }
+
+    func performPrimaryAudioAction() {
+        if isPreviewSession {
+            stopPreview()
+        } else if isRoutingActive {
+            stopRouting()
+        } else {
+            startRouting()
+        }
+    }
+
+    var primaryAudioActionTitle: String {
+        if isPreviewSession {
+            return "Stop Preview"
+        }
+        return isRoutingActive ? "Stop Routing" : "Start Routing"
+    }
+
+    var primaryAudioActionDisabled: Bool {
+        if previewSession.isTransitioning || isPluginOperationInFlight
+            || pendingAudioOperation != nil || operationAfterStop != nil
+        {
+            return true
+        }
+        if isPreviewSession {
+            return !isPreviewActive || (state != .running && state != .muted)
+        }
+        switch state {
+        case .starting, .stopping:
+            return true
+        default:
+            return !isRoutingActive && !canStartRouting
+        }
+    }
+
+    @discardableResult
+    func continuePreviewTransitionAfterStop() -> Bool {
+        switch previewSession {
+        case .switchingToPreview(let context, let output):
+            configureAndStartPreview(context: context, output: output)
+            return true
+        case .returning(let context, _):
+            restoreBlackHoleAfterPreview(context: context)
+            return true
+        case .inactive, .active:
+            return false
+        }
+    }
+
+    func cancelPreviewSession() {
+        if isPreviewSession {
+            configuredOutputTarget = nil
+        }
+        previewSession = previewSession.failClosed()
+    }
+
+    func restoreBlackHoleAfterPreviewFailure() {
+        guard isPreviewSession else {
+            return
+        }
+        let operationError = lastError
+        previewSession = .inactive
+        configuredOutputTarget = nil
+        guard state == .readyStopped else {
+            return
+        }
+        if configureBlackHole(startAfterConfiguration: false, muted: isMuted) {
+            lastError = operationError
+        }
+    }
+
+    func restartPreviewAfterSuccessfulAudioOperation() {
+        guard state == .readyStopped,
+            let restartingSession = previewSession.prepareRestart(),
+            let context = restartingSession.returnContext,
+            let output = restartingSession.output
+        else {
+            failClosedPreviewConfiguration(
+                "Preview could not be resumed after the audio operation."
+            )
+            return
+        }
+        previewSession = restartingSession
+        configureAndStartPreview(context: context, output: output)
+    }
+
+    private func configureAndStartPreview(
+        context: PreviewReturnContext,
+        output: PreviewOutput
+    ) {
+        guard case .switchingToPreview = previewSession,
+            routingMode == .automaticPrivateAggregate,
+            let currentOutput = defaultOutputDevice,
+            currentOutput.id == output.uid,
+            previewUnavailableReason == nil,
+            let values = configurationValues(),
+            let previewBufferFrames = previewBufferFrames(for: currentOutput)
+        else {
+            failClosedPreviewConfiguration(
+                "The Preview output is no longer the current eligible macOS main output."
+            )
+            return
+        }
+
+        configuredOutputTarget = nil
+        do {
+            try bridge.configureInputDeviceUID(
+                values.inputUID,
+                channelIndex: values.channelIndex,
+                outputDeviceUID: output.uid,
+                blackHoleDeviceUID: values.blackHoleUID,
+                mode: .automaticPrivateAggregate,
+                outputTarget: .systemPreview,
+                manualOutputChannelStart: 0,
+                sampleRate: 48_000,
+                bufferFrames: previewBufferFrames
+            )
+            configuredOutputTarget = .systemPreview
+            bridge.setMasterMuted(context.wasMuted)
+            isMuted = context.wasMuted
+            apply(.engineConfigured)
+            startRouting()
+        } catch {
+            handleBridgeError(error as NSError)
+        }
+    }
+
+    private func failClosedPreviewConfiguration(_ message: String) {
+        bridge.setMasterMuted(true)
+        bridge.stop()
+        configuredOutputTarget = nil
+        cancelPreviewSession()
+        lastError = "\(message) Preview remains stopped."
+        if state == .readyStopped {
+            apply(.audioConfigurationInvalid)
+        }
+    }
+
+    private func restoreBlackHoleAfterPreview(context: PreviewReturnContext) {
+        previewSession = .inactive
+        configureBlackHole(
+            startAfterConfiguration: context.wasRouting,
+            muted: context.wasMuted
+        )
+    }
+
+    @discardableResult
+    private func configureBlackHole(startAfterConfiguration: Bool, muted: Bool) -> Bool {
+        configuredOutputTarget = nil
+        guard let values = configurationValues() else {
+            lastError = "The saved BlackHole route is incomplete. Audio remains stopped."
+            apply(.audioConfigurationInvalid)
+            return false
+        }
+        do {
+            try bridge.configureInputDeviceUID(
+                values.inputUID,
+                channelIndex: values.channelIndex,
+                outputDeviceUID: values.outputUID,
+                blackHoleDeviceUID: values.blackHoleUID,
+                mode: routingMode.bridgeValue,
+                outputTarget: .blackHole,
+                manualOutputChannelStart: values.manualOutputChannelStart,
+                sampleRate: 48_000,
+                bufferFrames: bufferFrames
+            )
+            configuredOutputTarget = .blackHole
+            bridge.setMasterMuted(muted)
+            isMuted = muted
+            lastError = nil
+            apply(.engineConfigured)
+            if startAfterConfiguration {
+                startRouting()
+            }
+            return true
+        } catch {
+            handleBridgeError(error as NSError)
+            return false
+        }
     }
 
     func prepareForTermination(
@@ -546,6 +889,8 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
             }
             bridge.stop()
         }
+        configuredOutputTarget = nil
+        cancelPreviewSession()
         continueTerminationIfPossible()
     }
 
@@ -680,11 +1025,14 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     }
 
     private func handleWillSleep() {
-        routingBeforeSleep = isRoutingActive
+        let previewWasActive = isPreviewSession
+        routingBeforeSleep = isRoutingActive && !previewWasActive
         _ = recordRunOperation("sleep", routingWasActive: routingBeforeSleep)
         bridge.setMasterMuted(true)
         apply(.sleep)
         bridge.stop()
+        configuredOutputTarget = nil
+        cancelPreviewSession()
     }
 
     private func handleDidWake() {
@@ -703,8 +1051,18 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         let event = EngineStatusEventMapper.event(for: status, while: state)
         apply(event)
 
+        if status == .running || status == .muted,
+            let activeSession = previewSession.markActive(),
+            let output = activeSession.output
+        {
+            previewSession = activeSession
+            localLogService.log("previewStarted", fields: ["output": output.name])
+        }
+
         if status == .stopped || (status == .configured && wasStopping) {
-            handleEngineStoppedWorkflow()
+            if !continuePreviewTransitionAfterStop() {
+                handleEngineStoppedWorkflow()
+            }
         } else if status == .configured {
             attemptStartRoutingAtLaunch()
         }
@@ -712,7 +1070,12 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     }
 
     private func handleBridgeError(_ error: NSError) {
-        let wasRouting = isRoutingActive
+        let previewWasActive = isPreviewSession
+        let wasRouting = isRoutingActive && !previewWasActive
+        configuredOutputTarget = nil
+        if previewWasActive {
+            cancelPreviewSession()
+        }
         localLogService.log(
             "audioBridgeError",
             fields: ["code": "\(error.code)", "domain": error.domain]
@@ -748,15 +1111,41 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         case STBridgeError.Code.unsupportedSampleRate.rawValue:
             bridge.setMasterMuted(true)
             bridge.stop()
-            attemptOneDeviceReset(issue: .unsupportedSampleRate, wasRouting: wasRouting)
+            if previewWasActive {
+                failClosedForDeviceEvent(
+                    .engineFailed(.unsupportedSampleRate),
+                    message: "Preview stopped because the main output could not remain at 48 kHz."
+                )
+            } else {
+                attemptOneDeviceReset(issue: .unsupportedSampleRate, wasRouting: wasRouting)
+            }
         case STBridgeError.Code.unsupportedBufferSize.rawValue:
             bridge.setMasterMuted(true)
             bridge.stop()
-            attemptOneDeviceReset(issue: .unsupportedBufferSize, wasRouting: wasRouting)
+            if previewWasActive {
+                failClosedForDeviceEvent(
+                    .engineFailed(.unsupportedBufferSize),
+                    message: "Preview stopped because the shared buffer size became unavailable."
+                )
+            } else {
+                attemptOneDeviceReset(issue: .unsupportedBufferSize, wasRouting: wasRouting)
+            }
         case STBridgeError.Code.aggregateDeviceCreationFailed.rawValue:
             failClosedForDeviceEvent(
                 .engineFailed(.aggregateDeviceCreationFailed),
                 message: "The private CoreAudio route could not be created. Output remains silent."
+            )
+        case STBridgeError.Code.previewOutputUnavailable.rawValue:
+            failClosedForDeviceEvent(
+                .engineFailed(.outputDeviceMissing),
+                message:
+                    "Preview requires a live, non-aggregate stereo main output at 48 kHz."
+            )
+        case STBridgeError.Code.previewOutputChanged.rawValue:
+            failClosedForDeviceEvent(
+                .engineFailed(.outputDeviceMissing),
+                message:
+                    "Preview stopped because the macOS main output changed. Start it again explicitly."
             )
         default:
             failClosedForDeviceEvent(
@@ -859,6 +1248,7 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         let devices = bridge.audioDevices().map(AudioDevice.init)
         inputDevices = devices.filter { !$0.inputChannelNames.isEmpty }
         outputDevices = devices.filter { !$0.outputChannelNames.isEmpty }
+        defaultOutputDevice = bridge.defaultOutputDevice().map(AudioDevice.init)
     }
 
     @discardableResult

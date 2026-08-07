@@ -84,7 +84,7 @@ extension AppModel {
             return
         }
         guard entry.compatibility == .compatible else {
-            lastError = "This plug-in is not compatible with the v0.1 stereo chain."
+            lastError = "This plug-in is not compatible with the v0.2 stereo chain."
             return
         }
         guard !blockedPluginFingerprints.contains(entry.fingerprint) else {
@@ -575,8 +575,14 @@ extension AppModel {
         isPluginOperationInFlight = false
         let shouldResume = success && resumeAfterOperation
         resumeAfterOperation = false
-        if shouldResume, canStartRouting {
-            startRouting()
+        if shouldResume {
+            if isPreviewSession {
+                restartPreviewAfterSuccessfulAudioOperation()
+            } else if canStartRouting {
+                startRouting()
+            }
+        } else if isPreviewSession {
+            restoreBlackHoleAfterPreviewFailure()
         }
         continueTerminationIfPossible()
     }

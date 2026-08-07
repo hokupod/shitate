@@ -15,19 +15,21 @@ call.
 ## Status
 
 > [!WARNING]
-> **Pre-alpha — not yet production-ready.** Version `0.1.0-dev` is under
+> **Pre-alpha — not yet production-ready.** Version `0.2.0-dev` is under
 > implementation. There is no installable release or broad third-party VST3
 > compatibility evidence.
 
 Do not rely on Shi-tate for a call, recording, or production workflow until the
 relevant automated and manual evidence is published.
 
-## v0.1 scope
+## v0.2 scope
 
 - Apple Silicon (`arm64`) and macOS 14 or later.
 - Select one physical microphone channel and convert it to stereo dual mono.
 - Process up to eight serial, user-provided arm64 VST3 Audio Effects.
-- Route only to externally installed BlackHole 2ch at 48 kHz.
+- Route to externally installed BlackHole 2ch at 48 kHz.
+- Explicitly preview the processed signal on the current physical macOS main
+  output, exclusively instead of BlackHole.
 - Isolate one-bundle-at-a-time VST3 scanning in a helper process.
 - Fail closed to silence when a saved device, format, or plug-in is invalid.
 - Start in safe mode after a dirty shutdown before loading any VST3.
@@ -35,17 +37,18 @@ relevant automated and manual evidence is published.
 
 ## Non-goals
 
-v0.1 does not include a virtual driver, BlackHole or VST3 redistribution,
+v0.2 does not include a virtual driver, BlackHole or VST3 redistribution,
 Intel/Windows/Linux support, AU/CLAP/VST2, resampling, sidechains, instruments,
-monitoring, recording, telemetry, an updater, or runtime plug-in isolation.
+simultaneous BlackHole/main-output monitoring, preview output selection or
+volume, recording, telemetry, an updater, or runtime plug-in isolation.
 
 ## Architecture
 
 ```text
 Physical microphone
   → Shi-tate (serial VST3 Audio Effects)
-  → BlackHole 2ch
-  → Zoom / Slack / Google Meet / Discord
+  ├→ BlackHole 2ch → Zoom / Slack / Google Meet / Discord
+  └→ current macOS main output (exclusive Preview)
 ```
 
 SwiftUI owns the product UI and local state. A thin Objective-C++ bridge
@@ -107,6 +110,14 @@ routing from the Dashboard or menu bar. `Control-Shift-M` toggles master mute
 without Accessibility permission. Closing the main window leaves the menu-bar
 utility running; use Quit to terminate it.
 
+`Start Preview` temporarily stops BlackHole routing and sends the processed
+dual-mono signal to the current physical macOS main output. It is available only
+with Automatic routing, 48 kHz, a shared 128/256/512-frame buffer, and a live
+stereo output. Use headphones or keep speaker gain low to avoid feedback. An
+explicit `Stop Preview` restores BlackHole and resumes it only when routing was
+active before Preview, preserving the prior mute state. Output changes, sleep,
+permission loss, or errors stop Preview without automatic restart.
+
 See [manual audio QA](docs/manual-qa.md) for the exact verified and unverified
 hardware/product-flow evidence.
 
@@ -116,15 +127,15 @@ There is no signed release yet. When one is published, download its DMG and
 adjacent checksum from the same approved release, then verify before opening it:
 
 ```bash
-shasum -a 256 -c Shi-tate_0.1.0_arm64.dmg.sha256
+shasum -a 256 -c Shi-tate_0.2.0_arm64.dmg.sha256
 spctl --assess --type open --context context:primary-signature --verbose=4 \
-  Shi-tate_0.1.0_arm64.dmg
+  Shi-tate_0.2.0_arm64.dmg
 ```
 
 After dragging the app to Applications, verify it again with
 `spctl --assess --type execute --verbose=4 /Applications/Shi-tate.app`. Do not
 bypass Gatekeeper if either assessment fails. The release also provides a
-recursive `shitate-0.1.0-source.tar.zst` archive and SHA-256; GitHub's automatic
+recursive `shitate-0.2.0-source.tar.zst` archive and SHA-256; GitHub's automatic
 source archive is not the corresponding source because it omits JUCE contents.
 
 ## Privacy and security
@@ -132,14 +143,15 @@ source archive is not the corresponding source because it omits JUCE contents.
 Shi-tate is designed without audio storage, telemetry, crash upload, analytics,
 remote configuration, plug-in download, or app network access. It does not run
 a shell or require administrator privileges. Device failures never trigger an
-implicit fallback to another input or speaker.
+implicit fallback to another input or output. Main-output Preview is entered
+only by an explicit user action and stops if that output changes.
 
 Local asynchronous logs are owner-only, bounded to 5 MiB with three rotated
 generations, and redact home paths and device UIDs. `Copy Diagnostics` is an
 explicit clipboard action; Shi-tate never sends or automatically persists that
 report.
 
-VST3 plug-ins are untrusted native code. Scanning is isolated, but v0.1 runtime
+VST3 plug-ins are untrusted native code. Scanning is isolated, but v0.2 runtime
 plug-ins execute inside the main app and can crash, hang, access files, or use
 the network with your permissions. App Sandbox is disabled and Library
 Validation is disabled for the app/scanner to support user VST3 bundles;

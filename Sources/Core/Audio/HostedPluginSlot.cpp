@@ -35,7 +35,7 @@ plugins::PluginRuntimeResult HostedPluginSlot::prepare(double sampleRate, int ma
         maximumBlockSize != maximumPluginFrames) {
         return plugins::PluginRuntimeResult::failure(
             plugins::PluginRuntimeError::prepareFailed,
-            "The plug-in runtime format does not match the v0.1 contract.");
+            "The plug-in runtime format does not match the v0.2 contract.");
     }
     try {
         if (prepared_) {

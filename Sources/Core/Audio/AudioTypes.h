@@ -29,6 +29,8 @@ enum class AudioErrorCode : int {
     engineXRun = 108,
     invalidConfiguration = 109,
     callbackLayoutInvalid = 110,
+    previewOutputUnavailable = 111,
+    previewOutputChanged = 112,
 };
 
 struct AudioResult {
@@ -53,6 +55,13 @@ enum class RoutingMode : int {
     manualAggregate = 1,
 };
 
+enum class AudioOutputTarget : int {
+    blackHole = 0,
+    systemPreview = 1,
+};
+
+enum class AudioCallbackState : std::uint8_t { idle, active, cancelled };
+
 struct AudioDeviceInfo {
     std::string uid;
     std::string displayName;
@@ -66,6 +75,7 @@ struct AudioDeviceInfo {
     int maximumBufferFrames = 0;
     bool alive = false;
     bool aggregate = false;
+    bool physical = false;
 
     [[nodiscard]] bool hasInputs() const noexcept {
         return !inputChannelNames.empty();
@@ -77,6 +87,7 @@ struct AudioDeviceInfo {
 
 struct AudioConfiguration {
     RoutingMode mode = RoutingMode::automaticPrivateAggregate;
+    AudioOutputTarget outputTarget = AudioOutputTarget::blackHole;
     std::string inputDeviceUID;
     std::string outputDeviceUID;
     std::string blackHoleDeviceUID;

@@ -96,7 +96,7 @@ struct DashboardView: View {
                     GridRow {
                         Text("Output")
                             .foregroundStyle(.secondary)
-                        Text("BlackHole 2ch · Channels 1–2")
+                        Text(model.activeOutputDescription)
                     }
                     GridRow {
                         Text("Actual Format")
@@ -107,11 +107,19 @@ struct DashboardView: View {
                 }
                 Divider()
                 HStack {
-                    Button(model.isRoutingActive ? "Stop Routing" : "Start Routing") {
+                    Button(
+                        model.isRoutingActive && !model.isPreviewSession
+                            ? "Stop Routing" : "Start Routing"
+                    ) {
                         model.isRoutingActive ? model.stopRouting() : model.startRouting()
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(routingButtonDisabled)
+
+                    Button(previewButtonTitle) {
+                        model.isPreviewActive ? model.stopPreview() : model.startPreview()
+                    }
+                    .disabled(previewButtonDisabled)
 
                     Button(model.isMuted ? "Unmute" : "Mute") {
                         model.toggleMute()
@@ -123,6 +131,24 @@ struct DashboardView: View {
                     }
                     .disabled(model.pluginSlots.isEmpty || !model.canEditPluginChain)
                     Spacer()
+                }
+                if model.isPreviewSession {
+                    Label(
+                        "Use headphones or keep speaker volume low to avoid microphone feedback.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .foregroundStyle(.orange)
+                    .font(.callout)
+                } else if let reason = model.previewUnavailableReason {
+                    Text(reason)
+                        .foregroundStyle(.secondary)
+                        .font(.callout)
+                } else {
+                    Text(
+                        "Preview temporarily replaces BlackHole output with the current macOS main output."
+                    )
+                    .foregroundStyle(.secondary)
+                    .font(.callout)
                 }
             }
             .padding(.vertical, 4)
@@ -199,11 +225,40 @@ struct DashboardView: View {
     }
 
     private var routingButtonDisabled: Bool {
+        if model.isPreviewSession {
+            return true
+        }
         switch model.state {
         case .starting, .stopping:
-            true
+            return true
         default:
-            !model.isRoutingActive && !model.canStartRouting
+            return !model.isRoutingActive && !model.canStartRouting
+        }
+    }
+
+    private var previewButtonTitle: String {
+        switch model.previewSession {
+        case .inactive:
+            "Start Preview"
+        case .switchingToPreview:
+            "Starting Preview…"
+        case .active:
+            "Stop Preview"
+        case .returning:
+            "Stopping Preview…"
+        }
+    }
+
+    private var previewButtonDisabled: Bool {
+        switch model.previewSession {
+        case .inactive:
+            !model.canStartPreview
+        case .active:
+            model.isPluginOperationInFlight || model.pendingAudioOperation != nil
+                || model.operationAfterStop != nil
+                || (model.state != .running && model.state != .muted)
+        case .switchingToPreview, .returning:
+            true
         }
     }
 

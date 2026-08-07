@@ -171,6 +171,179 @@ final class AppModelWorkflowTests: XCTestCase {
         XCTAssertTrue(log.contains("pluginEditorOpenBlocked"))
         XCTAssertTrue(log.contains("reason=chainUnavailable"))
     }
+
+    @MainActor
+    func testPreviewChoosesAnotherSupportedSharedBufferWithoutPersistingIt() throws {
+        let fixture = try AppModelFixture()
+        defer { fixture.remove() }
+        let model = fixture.makeModel()
+        model.state = .readyStopped
+        model.sessionWorkflow = .complete
+        model.bufferFrames = 256
+        model.selectedInputUID = "microphone"
+        model.inputDevices = [
+            AudioDevice(
+                id: "microphone",
+                displayName: "USB Microphone",
+                inputChannelNames: ["Mic"],
+                allowedBufferFrames: [128, 256]
+            )
+        ]
+        model.defaultOutputDevice = AudioDevice(
+            id: "headphones",
+            displayName: "USB Headphones",
+            outputChannelNames: ["Left", "Right"],
+            allowedBufferFrames: [128]
+        )
+        model.configuredOutputTarget = .blackHole
+
+        XCTAssertEqual(model.previewBufferFrames, 128)
+        XCTAssertNil(model.previewUnavailableReason)
+        XCTAssertTrue(model.canStartPreview)
+        XCTAssertEqual(model.bufferFrames, 256)
+    }
+
+    @MainActor
+    func testPreviewExplainsManualAndVirtualOutputRejections() throws {
+        let fixture = try AppModelFixture()
+        defer { fixture.remove() }
+        let model = fixture.makeModel()
+        model.state = .readyStopped
+        model.sessionWorkflow = .complete
+        model.selectedInputUID = "microphone"
+        model.inputDevices = [
+            AudioDevice(
+                id: "microphone",
+                displayName: "USB Microphone",
+                inputChannelNames: ["Mic"]
+            )
+        ]
+        model.defaultOutputDevice = AudioDevice(
+            id: "virtual",
+            displayName: "Virtual Output",
+            outputChannelNames: ["Left", "Right"],
+            isPhysical: false
+        )
+
+        XCTAssertTrue(model.previewUnavailableReason?.contains("physical stereo") == true)
+        model.routingMode = .manualAggregate
+        XCTAssertTrue(model.previewUnavailableReason?.contains("Manual Aggregate") == true)
+        XCTAssertFalse(model.canStartPreview)
+    }
+
+    @MainActor
+    func testPersistenceFailureSilencesPreviewAndBlocksRestart() throws {
+        let fixture = try AppModelFixture(unsafeSessionParent: true)
+        defer { fixture.remove() }
+        let model = fixture.makeModel()
+        let output = PreviewOutput(uid: "headphones", name: "USB Headphones")
+        model.state = .running
+        model.sessionWorkflow = .complete
+        model.configuredOutputTarget = .systemPreview
+        model.previewSession = .active(
+            PreviewReturnContext(wasRouting: true, wasMuted: false),
+            output
+        )
+
+        model.persistSettings()
+
+        XCTAssertTrue(model.persistenceBlocksRouting)
+        XCTAssertEqual(model.previewSession, .inactive)
+        XCTAssertNil(model.configuredOutputTarget)
+        XCTAssertFalse(model.canStartPreview)
+        XCTAssertFalse(model.canStartRouting)
+        XCTAssertEqual(model.state, .blocked(.unexpectedEngineState))
+    }
+
+    @MainActor
+    func testStalePreviewConfigurationCannotStartBlackHoleRouting() throws {
+        let fixture = try AppModelFixture()
+        defer { fixture.remove() }
+        let model = fixture.makeModel()
+        model.state = .readyStopped
+        model.sessionWorkflow = .complete
+        model.configuredOutputTarget = .systemPreview
+
+        XCTAssertFalse(model.canStartRouting)
+        model.startRouting()
+
+        XCTAssertNil(model.configuredOutputTarget)
+        XCTAssertEqual(model.state, .needsAudioConfiguration)
+        XCTAssertTrue(model.lastError?.contains("configured again") == true)
+    }
+
+    @MainActor
+    func testPreviewRestartRejectsManualAggregateModeAndFailsClosed() throws {
+        let fixture = try AppModelFixture()
+        defer { fixture.remove() }
+        let model = fixture.makeModel()
+        let output = PreviewOutput(uid: "headphones", name: "USB Headphones")
+        model.state = .readyStopped
+        model.sessionWorkflow = .complete
+        model.routingMode = .manualAggregate
+        model.configuredOutputTarget = .systemPreview
+        model.previewSession = .active(
+            PreviewReturnContext(wasRouting: true, wasMuted: false),
+            output
+        )
+
+        model.restartPreviewAfterSuccessfulAudioOperation()
+
+        XCTAssertEqual(model.previewSession, .inactive)
+        XCTAssertNil(model.configuredOutputTarget)
+        XCTAssertEqual(model.state, .needsAudioConfiguration)
+        XCTAssertTrue(model.lastError?.contains("remains stopped") == true)
+    }
+
+    @MainActor
+    func testPreviewRestartRejectsAChangedDefaultOutputAndFailsClosed() throws {
+        let fixture = try AppModelFixture()
+        defer { fixture.remove() }
+        let model = fixture.makeModel()
+        let capturedOutput = PreviewOutput(uid: "headphones", name: "USB Headphones")
+        model.state = .readyStopped
+        model.sessionWorkflow = .complete
+        model.configuredOutputTarget = .systemPreview
+        model.previewSession = .active(
+            PreviewReturnContext(wasRouting: true, wasMuted: true),
+            capturedOutput
+        )
+        model.defaultOutputDevice = AudioDevice(
+            id: "speakers",
+            displayName: "MacBook Pro Speakers",
+            outputChannelNames: ["Left", "Right"]
+        )
+
+        model.restartPreviewAfterSuccessfulAudioOperation()
+
+        XCTAssertEqual(model.previewSession, .inactive)
+        XCTAssertNil(model.configuredOutputTarget)
+        XCTAssertEqual(model.state, .needsAudioConfiguration)
+        XCTAssertTrue(model.lastError?.contains("eligible macOS main output") == true)
+    }
+
+    @MainActor
+    func testPreviewRestartRejectsAMissingDefaultOutputAndFailsClosed() throws {
+        let fixture = try AppModelFixture()
+        defer { fixture.remove() }
+        let model = fixture.makeModel()
+        let capturedOutput = PreviewOutput(uid: "headphones", name: "USB Headphones")
+        model.state = .readyStopped
+        model.sessionWorkflow = .complete
+        model.configuredOutputTarget = .systemPreview
+        model.previewSession = .active(
+            PreviewReturnContext(wasRouting: true, wasMuted: false),
+            capturedOutput
+        )
+        model.defaultOutputDevice = nil
+
+        model.restartPreviewAfterSuccessfulAudioOperation()
+
+        XCTAssertEqual(model.previewSession, .inactive)
+        XCTAssertNil(model.configuredOutputTarget)
+        XCTAssertEqual(model.state, .needsAudioConfiguration)
+        XCTAssertTrue(model.lastError?.contains("remains stopped") == true)
+    }
 }
 
 @MainActor

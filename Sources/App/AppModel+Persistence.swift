@@ -21,10 +21,9 @@ extension AppModel {
             additionalPluginFolders = try auxiliaryStore.loadScanFolders().folders
             persistenceBlocksRouting = false
         } catch {
-            persistenceBlocksRouting = true
-            lastError =
+            blockRoutingAfterPersistenceFailure(
                 "Saved settings could not be validated. Routing remains stopped. \(error.localizedDescription)"
-            apply(.engineFailed(.unexpectedEngineState))
+            )
         }
     }
 
@@ -42,14 +41,20 @@ extension AppModel {
         do {
             try settingsStore.save(settings)
         } catch {
-            persistenceBlocksRouting = true
-            lastError =
+            blockRoutingAfterPersistenceFailure(
                 "Settings could not be saved. Routing remains stopped. \(error.localizedDescription)"
-            if isRoutingActive {
-                bridge.stop()
-            }
-            apply(.engineFailed(.unexpectedEngineState))
+            )
         }
+    }
+
+    private func blockRoutingAfterPersistenceFailure(_ message: String) {
+        bridge.setMasterMuted(true)
+        bridge.stop()
+        configuredOutputTarget = nil
+        cancelPreviewSession()
+        persistenceBlocksRouting = true
+        lastError = message
+        apply(.engineFailed(.unexpectedEngineState))
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
