@@ -16,6 +16,13 @@ struct ChainView: View {
                     .foregroundStyle(.secondary)
             }
             workflowNotice
+            if let error = model.pluginEditorError {
+                InlineNotice(
+                    title: "Plug-in Editor Didn’t Open",
+                    message: "\(error) Review Diagnostics for the recorded failure details.",
+                    kind: .error
+                )
+            }
             chainContent
             actionBar
         }

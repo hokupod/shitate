@@ -126,6 +126,51 @@ final class AppModelWorkflowTests: XCTestCase {
         model.prepareForTermination { cleanResult = $0 }
         XCTAssertEqual(cleanResult, false)
     }
+
+    @MainActor
+    func testEditorOpenFailureIsVisibleAndRecorded() throws {
+        let fixture = try AppModelFixture()
+        defer { fixture.remove() }
+        let model = fixture.makeModel()
+        model.sessionWorkflow = .complete
+        model.state = .readyStopped
+
+        model.openPluginEditor(UUID())
+        model.localLogService.flush()
+
+        XCTAssertTrue(model.pluginEditorError?.contains("could not be opened") == true)
+        let log = try String(contentsOf: model.localLogService.currentLogURL, encoding: .utf8)
+        XCTAssertTrue(log.contains("pluginEditorOpenRequested"))
+        XCTAssertTrue(log.contains("pluginEditorOpenFailed"))
+        XCTAssertTrue(log.contains("code="))
+        XCTAssertTrue(log.contains("domain="))
+        XCTAssertTrue(log.contains("slot=unknown"))
+        XCTAssertFalse(log.contains("message="))
+        XCTAssertFalse(log.contains("slot was not found"))
+
+        model.refreshPluginSlots()
+        XCTAssertNil(model.pluginEditorError)
+        XCTAssertNil(model.pluginEditorErrorSlotID)
+        XCTAssertNil(model.lastError)
+    }
+
+    @MainActor
+    func testBlockedEditorOpenReplacesStaleNoticeAndIsRecorded() throws {
+        let fixture = try AppModelFixture()
+        defer { fixture.remove() }
+        let model = fixture.makeModel()
+        model.pluginEditorError = "stale editor failure"
+        model.lastError = model.pluginEditorError
+
+        model.openPluginEditor(UUID())
+        model.localLogService.flush()
+
+        XCTAssertTrue(model.pluginEditorError?.contains("temporarily unavailable") == true)
+        XCTAssertEqual(model.lastError, model.pluginEditorError)
+        let log = try String(contentsOf: model.localLogService.currentLogURL, encoding: .utf8)
+        XCTAssertTrue(log.contains("pluginEditorOpenBlocked"))
+        XCTAssertTrue(log.contains("reason=chainUnavailable"))
+    }
 }
 
 @MainActor

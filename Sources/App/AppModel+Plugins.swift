@@ -206,13 +206,40 @@ extension AppModel {
     }
 
     func openPluginEditor(_ slotID: UUID) {
+        let slotIndex = pluginSlots.firstIndex { $0.id == slotID }
+        let slot = slotIndex.map { pluginSlots[$0] }
+        var fields = [
+            "routingState": statusTitle,
+            "slot": slotIndex.map { "\($0 + 1)" } ?? "unknown",
+        ]
+        if let slot {
+            fields["fingerprint"] = String(slot.fingerprint.prefix(12))
+            fields["hasEditor"] = "\(slot.hasEditor)"
+            fields["name"] = slot.name
+        }
+
+        clearPluginEditorError()
         guard canEditPluginChain else {
+            fields["reason"] = "chainUnavailable"
+            localLogService.log("pluginEditorOpenBlocked", fields: fields)
+            setPluginEditorError(
+                "The plug-in editor is temporarily unavailable while the chain is changing. "
+                    + "Try again when Edit is enabled.",
+                slotID: slotID
+            )
             return
         }
+        localLogService.log("pluginEditorOpenRequested", fields: fields)
         do {
             try bridge.openEditorForPluginSlot(with: slotID)
+            localLogService.log("pluginEditorOpenSucceeded", fields: fields)
         } catch {
-            lastError = error.localizedDescription
+            let bridgeError = error as NSError
+            let message = "The plug-in editor could not be opened. \(error.localizedDescription)"
+            fields["code"] = "\(bridgeError.code)"
+            fields["domain"] = bridgeError.domain
+            localLogService.log("pluginEditorOpenFailed", fields: fields)
+            setPluginEditorError(message, slotID: slotID)
         }
     }
 
@@ -348,7 +375,7 @@ extension AppModel {
     }
 
     func refreshPluginSlots() {
-        pluginSlots = bridge.pluginSlots().map { slot in
+        let refreshedSlots = bridge.pluginSlots().map { slot in
             PluginSlotPresentation(
                 id: slot.slotID,
                 fingerprint: slot.fingerprint,
@@ -361,6 +388,26 @@ extension AppModel {
                 hasEditor: slot.hasEditor
             )
         }
+        pluginSlots = refreshedSlots
+        if let pluginEditorErrorSlotID,
+            !refreshedSlots.contains(where: { $0.id == pluginEditorErrorSlotID })
+        {
+            clearPluginEditorError()
+        }
+    }
+
+    private func setPluginEditorError(_ message: String, slotID: UUID) {
+        pluginEditorError = message
+        pluginEditorErrorSlotID = slotID
+        lastError = message
+    }
+
+    private func clearPluginEditorError() {
+        if lastError == pluginEditorError {
+            lastError = nil
+        }
+        pluginEditorError = nil
+        pluginEditorErrorSlotID = nil
     }
 
     private func requestAudioOperation(_ operation: PendingAudioOperation) {

@@ -12,8 +12,8 @@ namespace {
 
 class RuntimeEditorWindow final : public juce::DocumentWindow {
   public:
-    explicit RuntimeEditorWindow(const juce::String& title)
-        : DocumentWindow(title, juce::Colours::black, DocumentWindow::closeButton, false) {
+    RuntimeEditorWindow(const juce::String& title, bool addToDesktop)
+        : DocumentWindow(title, juce::Colours::black, DocumentWindow::closeButton, addToDesktop) {
         setUsingNativeTitleBar(true);
         setResizable(true, false);
     }
@@ -55,14 +55,18 @@ PluginRuntimeResult PluginEditorWindowManager::open(HostedPluginSlot& slot) {
         return PluginRuntimeResult::failure(PluginRuntimeError::editorUnavailable,
                                             "The plug-in editor could not be created.");
     }
-    auto window =
-        std::make_unique<RuntimeEditorWindow>(juce::String::fromUTF8(slot.identity().name.c_str()));
+    auto window = std::make_unique<RuntimeEditorWindow>(
+        juce::String::fromUTF8(slot.identity().name.c_str()), showWindows_);
     const auto width = std::clamp(editor->getWidth(), minimumWidth, maximumWidth);
     const auto height = std::clamp(editor->getHeight(), minimumHeight, maximumHeight);
     window->setResizeLimits(minimumWidth, minimumHeight, maximumWidth, maximumHeight);
     window->setContentOwned(editor, true);
     window->centreWithSize(width, height);
     if (showWindows_) {
+        if (!window->isOnDesktop()) {
+            return PluginRuntimeResult::failure(PluginRuntimeError::editorUnavailable,
+                                                "The plug-in editor window could not be attached.");
+        }
         window->setVisible(true);
         window->toFront(true);
     }
@@ -111,6 +115,15 @@ PluginEditorWindowManager::windowSizeForTesting(const SlotId& slotID) const noex
         return std::nullopt;
     }
     return std::pair{windows_[index].window->getWidth(), windows_[index].window->getHeight()};
+}
+
+std::optional<bool>
+PluginEditorWindowManager::windowIsOnDesktopForTesting(const SlotId& slotID) const noexcept {
+    const auto index = indexOf(slotID);
+    if (index == maximumWindows || windows_[index].window == nullptr) {
+        return std::nullopt;
+    }
+    return windows_[index].window->isOnDesktop();
 }
 
 bool PluginEditorWindowManager::isMessageThread() const noexcept {

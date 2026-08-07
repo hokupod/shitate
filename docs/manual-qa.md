@@ -88,12 +88,27 @@ private aggregate, exact subdevices, BlackHole clock, input drift compensation,
 | Permission request and grant | VERIFIED | User-approved macOS prompt and allowed-state UI |
 | Physical input selection and 48 kHz validation | VERIFIED | AT2040USB, channel 1, 256 frames |
 | Zero-plug-in scan, save, and completion | VERIFIED | One compatible catalog entry; empty session saved with mode `0600` |
-| Add, edit, bypass, reorder, remove third-party VST3 | UNVERIFIED | No third-party plug-in was loaded during this privacy-safe run |
+| Add, edit, bypass, reorder, remove third-party VST3 | PARTIAL | User-approved RNNoise loaded and its native editor opened; bypass, reorder, and remove remain unverified |
 | Menu-bar mute | VERIFIED | Earlier live-meter sequence in this document; no acoustic monitoring |
 | Main-window hide and reopen | UNVERIFIED | Requires a stable post-build accessibility attachment |
 | Quit and fresh-process session restore | UNVERIFIED | Persistence round-trip is automated; final screen was not re-inspected |
 | Incomplete plug-in recovery choices | UNVERIFIED | Controls are present; no third-party bundle was invalidated manually |
 | Zoom or Google Meet microphone selection | UNVERIFIED | No communication app was exercised |
+
+## Third-party editor follow-up record
+
+- Recorded: 2026-08-07 18:32 (JST)
+- Build: local `0.1.0-dev` Debug app with the editor-window attachment fix
+- Plug-in: RNNoise suppression for voice 1.10 by werman, restored from the
+  user-approved session with fingerprint prefix `8ace66d08bd3`
+- Interaction: Edit opened the native RNNoise controls in a separate foreground
+  window; closing and selecting Edit again reopened the same editor successfully
+- Observability: the local owner-only log recorded
+  `pluginEditorOpenRequested` and `pluginEditorOpenSucceeded` with slot number,
+  routing state, editor capability, and truncated fingerprint
+- Boundary: two open/close cycles passed without changing plug-in parameters;
+  bypass, reorder, remove, audio quality, and the 100-cycle reliability gate were
+  not exercised
 
 ## Phase 7 recovery and release-policy record
 
@@ -133,7 +148,7 @@ private aggregate, exact subdevices, BlackHole clock, input drift compensation,
 | Physical input and BlackHole removal | UNVERIFIED | Fail-closed reducer/policy tests pass; hot-unplug not performed |
 | Ten sleep/wake cycles | UNVERIFIED | Delay/coalescing/default-off policy tests pass; real cycles not performed |
 | Sample-rate and buffer changes | PARTIAL | 128/256/512 short gates pass; live rate/buffer mutation not performed |
-| 100 editor open/close cycles | UNVERIFIED | Native editor lifecycle unit tests pass; count gate not performed |
+| 100 editor open/close cycles | UNVERIFIED | Desktop-attachment regression test and two live RNNoise cycles pass; count gate not performed |
 | Runtime CrashPlugin → next-launch safe mode | AUTOMATED PASS | Disposable child crash and fresh-process run-state harness |
 | 1,000 global mute toggles | UNVERIFIED | Single live UI sequence and audio-unit ramp tests only |
 | Zoom and Google Meet dual mono | UNVERIFIED | Neither communication application was exercised |
@@ -144,7 +159,7 @@ private aggregate, exact subdevices, BlackHole clock, input drift compensation,
 |---|---|---|
 | arm64/macOS 14 binary contract | AUTOMATED PASS | Release Mach-O architecture and minimum-OS checks; macOS 14 runtime launch remains unverified |
 | Physical microphone/channel and BlackHole 48 kHz route | PARTIAL | AT2040USB short gate, exact BlackHole route, 128/256/512, xrun 0; long/communication-app gates remain |
-| Eight-slot VST3 chain/editor/bypass/reorder/state | AUTOMATED PASS | Deterministic fixtures and workflow tests; broad third-party compatibility remains unverified |
+| Eight-slot VST3 chain/editor/bypass/reorder/state | AUTOMATED PASS | Deterministic fixtures and workflow tests plus live RNNoise editor open/reopen; broad third-party compatibility remains unverified |
 | Global mute and menu-bar residency | PARTIAL | Live mute state/meter sequence and UI tests; long/repeated interaction gates remain |
 | Scanner isolation/reaping and non-finite safety | AUTOMATED PASS | Crash/hang scanner integration and per-slot/final safety tests |
 | Fail-closed device/sleep/wake recovery | AUTOMATED PASS | State/event policy and race tests; hot-unplug and ten real sleep cycles remain unverified |

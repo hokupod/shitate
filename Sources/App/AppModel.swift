@@ -175,6 +175,8 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     var diagnostics: AudioDiagnostics = .empty
     var isMuted = false
     var lastError: String?
+    var pluginEditorError: String?
+    var pluginEditorErrorSlotID: UUID?
     var lastTransitionError: ApplicationTransitionError?
     var pluginCatalogError: String?
     var canAcceptDetectedBlackHole = false

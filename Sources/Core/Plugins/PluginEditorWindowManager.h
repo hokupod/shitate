@@ -35,6 +35,8 @@ class PluginEditorWindowManager final {
     [[nodiscard]] std::size_t size() const noexcept;
     [[nodiscard]] std::optional<std::pair<int, int>>
     windowSizeForTesting(const SlotId& slotID) const noexcept;
+    [[nodiscard]] std::optional<bool>
+    windowIsOnDesktopForTesting(const SlotId& slotID) const noexcept;
 
   private:
     struct WindowEntry final {

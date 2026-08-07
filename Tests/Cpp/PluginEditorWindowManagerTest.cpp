@@ -55,6 +55,14 @@ class PluginEditorWindowManagerTest final : public juce::UnitTest {
         background.join();
         expect(offMain.error == shitate::plugins::PluginRuntimeError::editorThreadInvalid);
 
+        beginTest("visible editor attaches to the desktop");
+        shitate::plugins::PluginEditorWindowManager visibleManager;
+        auto visible = shitate::test::makeSlot(
+            queue, 4, {.providesEditor = true, .editorWidth = 480, .editorHeight = 320});
+        expect(visibleManager.open(*visible).succeeded());
+        expect(visibleManager.windowIsOnDesktopForTesting(visible->id()).value_or(false));
+        visibleManager.closeAll();
+
         beginTest("slot removal and shutdown close every native editor");
         expect(manager.close(small->id()).succeeded());
         expect(!manager.isOpen(small->id()));
