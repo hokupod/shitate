@@ -97,12 +97,14 @@ private aggregate, exact subdevices, BlackHole clock, input drift compensation,
 
 ## Phase 7 recovery and release-policy record
 
-- Recorded: 2026-08-07 16:20 (JST)
-- Source: Phase 7 worktree based on `15643b2d5c3c`
+- Recorded: 2026-08-07 17:25 (JST)
+- Source: clean, reviewed Phase 7 branch HEAD; exact commits are embedded in the
+  app Info.plist and recursive source metadata
 - Host/toolchain: Apple Silicon, macOS 26.5.2 (25F84), Xcode 26.6
 - Full CTest: 28 registered, 27 passed, 0 failed, 1 hardware opt-in skip
-- Recovery label: 2/2 passed, including a disposable runtime CrashPlugin child
-  followed by a fresh-process safe-mode assertion before plug-in factory use
+- Recovery label: 2/2 passed, including direct `waitpid` proof that the
+  disposable runtime CrashPlugin reached `processBlock` and terminated by
+  SIGABRT, followed by fresh-process safe mode before plug-in factory use
 - Security label: 3/3 passed, including entitlement/content/network negative
   fixtures and GitHub workflow-policy negative fixtures
 - Release build: `BUILD_TESTING=OFF`, arm64, minimum macOS 14.0, ad-hoc
@@ -112,8 +114,12 @@ private aggregate, exact subdevices, BlackHole clock, input drift compensation,
   release app/helper after dead stripping the unused JUCE URL backend
 - Local package: `Shi-tate_0.1.0_arm64.dmg` created as UDZO/HFS+ and its
   adjacent SHA-256 verified; this is not Developer ID/notarization evidence
-- Source archive: `PENDING` until the reviewed Phase 7 files are committed and a
-  clean recursive archive can identify its exact commit
+- Source archive: `LOCAL PASS`; SHA-256 and recursive JUCE hashes verified, then
+  a clean extraction under an unrelated parent Git checkout built 39 targets
+  and ran all 28 registered tests without a dependency download
+- Local provenance: in-toto statement covers the DMG, recursive source archive,
+  and third-party notices at the embedded exact commit; no hosted attestation is
+  claimed
 - Remote CI/CodeQL: `UNVERIFIED`; workflow policy is tested locally, but no
   GitHub-hosted run is claimed
 
@@ -147,7 +153,7 @@ private aggregate, exact subdevices, BlackHole clock, input drift compensation,
 | No app networking/admin/shell/bundled driver or VST3 | AUTOMATED PASS | Source, Mach-O dependency/symbol, entitlement, and bundle policy tests |
 | Ad-hoc release layout and DMG/SHA-256 | LOCAL PASS | Explicitly not distribution-signing evidence |
 | Developer ID, notarization, staple, Gatekeeper | BLOCKED | No credential use or release authority was provided; no production release attempted |
-| Recursive source rebuild and provenance | PENDING | Run only after the final reviewed commit; release workflow is locally policy-tested |
+| Recursive source rebuild and provenance | LOCAL PASS | Exact source metadata overrides an unrelated parent Git checkout; clean extraction built, tested, and produced local in-toto provenance without dependency download |
 | Remote CI and CodeQL | UNVERIFIED | No push or remote workflow run was authorized |
 
 No tag, GitHub Release, upload, signing credential, or notarization service was
