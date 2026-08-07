@@ -77,6 +77,22 @@ typedef NS_ENUM(NSInteger, STPluginScanProgress) {
 
 @end
 
+@interface STPluginSlotInfo : NSObject
+
+@property(nonatomic, readonly, copy) NSUUID* slotID;
+@property(nonatomic, readonly, copy) NSString* fingerprint;
+@property(nonatomic, readonly, copy) NSString* name;
+@property(nonatomic, readonly, copy) NSString* manufacturer;
+@property(nonatomic, readonly, copy) NSString* version;
+@property(nonatomic, readonly, getter=isBypassed) BOOL bypassed;
+@property(nonatomic, readonly, getter=isFaulted) BOOL faulted;
+@property(nonatomic, readonly) NSInteger latencySamples;
+@property(nonatomic, readonly) BOOL hasEditor;
+
+- (instancetype)init NS_UNAVAILABLE;
+
+@end
+
 @interface STPluginBridge : NSObject {
   @private
     void* _storage;

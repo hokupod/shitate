@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
@@ -55,7 +56,13 @@ juce::AudioProcessor::BusesProperties ShitateTestPluginProcessor::buses() {
         .withOutput("Output", juce::AudioChannelSet::stereo(), true);
 }
 
-ShitateTestPluginProcessor::ShitateTestPluginProcessor() : AudioProcessor(buses()) {}
+ShitateTestPluginProcessor::ShitateTestPluginProcessor() : AudioProcessor(buses()) {
+    if constexpr (kind == gain) {
+        gainParameter_ = new juce::AudioParameterFloat(
+            juce::ParameterID{"gain", 1}, "Gain", juce::NormalisableRange<float>{0.0F, 2.0F}, 0.5F);
+        addParameter(gainParameter_);
+    }
+}
 
 void ShitateTestPluginProcessor::prepareToPlay(double, int) {
     if constexpr (kind == latency) {
@@ -84,7 +91,7 @@ bool ShitateTestPluginProcessor::isBusesLayoutSupported(const BusesLayout& layou
 void ShitateTestPluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) {
     juce::ScopedNoDenormals noDenormals;
     if constexpr (kind == gain) {
-        buffer.applyGain(0.5F);
+        buffer.applyGain(gainParameter_ != nullptr ? gainParameter_->get() : 0.5F);
     } else if constexpr (kind == nonFinite) {
         if (buffer.getNumChannels() > 0 && buffer.getNumSamples() > 0) {
             buffer.setSample(0, 0, std::numeric_limits<float>::quiet_NaN());
@@ -151,11 +158,28 @@ const juce::String ShitateTestPluginProcessor::getProgramName(int) {
 void ShitateTestPluginProcessor::changeProgramName(int, const juce::String&) {}
 
 void ShitateTestPluginProcessor::getStateInformation(juce::MemoryBlock& destinationData) {
+    if constexpr (kind == gain) {
+        const auto gainValue = gainParameter_ != nullptr ? gainParameter_->get() : 0.5F;
+        destinationData.replaceAll(&gainValue, sizeof(gainValue));
+        return;
+    }
     const std::uint8_t state = static_cast<std::uint8_t>(kind);
     destinationData.replaceAll(&state, sizeof(state));
 }
 
-void ShitateTestPluginProcessor::setStateInformation(const void*, int) {}
+void ShitateTestPluginProcessor::setStateInformation(const void* data, int sizeInBytes) {
+    if constexpr (kind == gain) {
+        if (data == nullptr || sizeInBytes != static_cast<int>(sizeof(float))) {
+            return;
+        }
+        float restored = 0.0F;
+        std::memcpy(&restored, data, sizeof(restored));
+        if (gainParameter_ != nullptr && std::isfinite(restored) && restored >= 0.0F &&
+            restored <= 2.0F) {
+            *gainParameter_ = restored;
+        }
+    }
+}
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() {
     return new ShitateTestPluginProcessor();

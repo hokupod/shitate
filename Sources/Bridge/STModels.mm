@@ -65,6 +65,8 @@
                       bufferFrames:(NSInteger)bufferFrames
                inputLatencySamples:(NSInteger)inputLatencySamples
               outputLatencySamples:(NSInteger)outputLatencySamples
+              pluginLatencySamples:(NSInteger)pluginLatencySamples
+           aggregateLatencySamples:(NSInteger)aggregateLatencySamples
                          xrunCount:(NSInteger)xrunCount
        callbackTimeEmaMicroseconds:(double)callbackTimeEmaMicroseconds {
     self = [super init];
@@ -73,6 +75,8 @@
         _bufferFrames = bufferFrames;
         _inputLatencySamples = inputLatencySamples;
         _outputLatencySamples = outputLatencySamples;
+        _pluginLatencySamples = pluginLatencySamples;
+        _aggregateLatencySamples = aggregateLatencySamples;
         _xrunCount = xrunCount;
         _callbackTimeEmaMicroseconds = callbackTimeEmaMicroseconds;
     }

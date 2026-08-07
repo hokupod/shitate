@@ -9,6 +9,7 @@
 #include "MasterOutputStage.h"
 #include "MeterAccumulator.h"
 #include "OutputSafetyProcessor.h"
+#include "PluginChain.h"
 #include "RealtimeEventQueue.h"
 
 #include <atomic>
@@ -21,7 +22,8 @@ enum class AudioCallbackState : std::uint8_t { idle, active, cancelled };
 
 class AudioEngine final : public juce::AudioIODeviceCallback {
   public:
-    AudioEngine(DeviceService& deviceService, RealtimeEventQueue& eventQueue) noexcept;
+    AudioEngine(DeviceService& deviceService, RealtimeEventQueue& eventQueue,
+                PluginChain* pluginChain = nullptr) noexcept;
     ~AudioEngine() override;
 
     [[nodiscard]] AudioResult configure(const AudioConfiguration& configuration);
@@ -46,7 +48,8 @@ class AudioEngine final : public juce::AudioIODeviceCallback {
                                      const juce::AudioIODeviceCallbackContext& context) override;
 
 #ifndef NDEBUG
-    explicit AudioEngine(RealtimeEventQueue& eventQueue) noexcept;
+    explicit AudioEngine(RealtimeEventQueue& eventQueue,
+                         PluginChain* pluginChain = nullptr) noexcept;
     void prepareForTesting(double sampleRate);
     void setRunningForTesting(bool running) noexcept;
     void setCallbackBarrierForTesting(std::atomic<bool>* entered,
@@ -55,9 +58,10 @@ class AudioEngine final : public juce::AudioIODeviceCallback {
 #endif
 
   private:
-    void prepareProcessing(double sampleRate);
+    [[nodiscard]] bool prepareProcessing(double sampleRate);
     void servicePendingStop() noexcept;
     void completeStop() noexcept;
+    void waitForCallbackQuiescence() const noexcept;
     void setStatus(EngineStatus status) noexcept;
     void cancelOutput() noexcept;
     void requestRecovery(AudioErrorCode error) noexcept;
@@ -68,7 +72,9 @@ class AudioEngine final : public juce::AudioIODeviceCallback {
 
     DeviceService* deviceService_ = nullptr;
     RealtimeEventQueue& eventQueue_;
+    PluginChain* pluginChain_ = nullptr;
     juce::AudioBuffer<float> workingBuffer_;
+    juce::MidiBuffer midiBuffer_;
     InputMapper inputMapper_;
     MeterAccumulator inputMeter_;
     MeterAccumulator outputMeter_;

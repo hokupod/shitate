@@ -76,6 +76,8 @@ typedef NS_ENUM(NSInteger, STAudioRoutingMode) {
 @property(nonatomic, readonly) NSInteger bufferFrames;
 @property(nonatomic, readonly) NSInteger inputLatencySamples;
 @property(nonatomic, readonly) NSInteger outputLatencySamples;
+@property(nonatomic, readonly) NSInteger pluginLatencySamples;
+@property(nonatomic, readonly) NSInteger aggregateLatencySamples;
 @property(nonatomic, readonly) NSInteger xrunCount;
 @property(nonatomic, readonly) double callbackTimeEmaMicroseconds;
 
@@ -83,6 +85,8 @@ typedef NS_ENUM(NSInteger, STAudioRoutingMode) {
                       bufferFrames:(NSInteger)bufferFrames
                inputLatencySamples:(NSInteger)inputLatencySamples
               outputLatencySamples:(NSInteger)outputLatencySamples
+              pluginLatencySamples:(NSInteger)pluginLatencySamples
+           aggregateLatencySamples:(NSInteger)aggregateLatencySamples
                          xrunCount:(NSInteger)xrunCount
        callbackTimeEmaMicroseconds:(double)callbackTimeEmaMicroseconds NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;

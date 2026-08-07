@@ -38,4 +38,34 @@ final class BridgeVersionTests: XCTestCase {
             )
         }
     }
+
+    func testRuntimeBridgeStartsEmptyAndMapsStableSlotErrors() {
+        let bridge = STAudioEngineBridge()
+
+        XCTAssertTrue(bridge.pluginSlots().isEmpty)
+        XCTAssertEqual(bridge.diagnostics().pluginLatencySamples, 0)
+        XCTAssertEqual(bridge.diagnostics().aggregateLatencySamples, 0)
+        XCTAssertEqual(
+            STBridgeError.Code.pluginMutationAppliedRestartFailed.rawValue,
+            315
+        )
+    }
+
+    func testStoppedRuntimeMutationCompletesOnMainQueue() {
+        let bridge = STAudioEngineBridge()
+        let completion = expectation(description: "runtime mutation completion")
+
+        bridge.removePluginSlot(with: UUID()) { error in
+            XCTAssertTrue(Thread.isMainThread)
+            let error = error as NSError?
+            XCTAssertEqual(error?.domain, STBridgeErrorDomain)
+            XCTAssertEqual(
+                error?.code,
+                STBridgeError.Code.pluginSlotNotFound.rawValue
+            )
+            completion.fulfill()
+        }
+
+        wait(for: [completion], timeout: 1)
+    }
 }

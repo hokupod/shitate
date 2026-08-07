@@ -31,4 +31,6 @@ class ShitateTestPluginProcessor final : public juce::AudioProcessor {
 
   private:
     [[nodiscard]] static BusesProperties buses();
+
+    juce::AudioParameterFloat* gainParameter_{nullptr};
 };

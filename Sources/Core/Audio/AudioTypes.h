@@ -102,6 +102,8 @@ struct EngineDiagnostics {
     int bufferFrames = 0;
     int inputLatencySamples = 0;
     int outputLatencySamples = 0;
+    int pluginLatencySamples = 0;
+    int aggregateLatencySamples = 0;
     int xrunCount = 0;
     double callbackTimeEmaMicroseconds = 0.0;
 };
@@ -122,6 +124,7 @@ enum class CoreEventType : std::uint8_t {
     xrunDetected = 2,
     recoveryRequested = 3,
     fatalError = 4,
+    pluginSlotFaulted = 5,
 };
 
 struct CoreEvent {

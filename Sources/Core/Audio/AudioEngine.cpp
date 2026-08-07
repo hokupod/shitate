@@ -7,9 +7,9 @@
 
 #include <algorithm>
 #include <chrono>
-#ifndef NDEBUG
+#include <cstdint>
+#include <limits>
 #include <thread>
-#endif
 
 namespace shitate {
 namespace {
@@ -45,18 +45,27 @@ class CallbackScope final {
 
 } // namespace
 
-AudioEngine::AudioEngine(DeviceService& deviceService, RealtimeEventQueue& eventQueue) noexcept
-    : deviceService_(&deviceService), eventQueue_(eventQueue) {}
+AudioEngine::AudioEngine(DeviceService& deviceService, RealtimeEventQueue& eventQueue,
+                         PluginChain* pluginChain) noexcept
+    : deviceService_(&deviceService), eventQueue_(eventQueue), pluginChain_(pluginChain) {}
 
 #ifndef NDEBUG
-AudioEngine::AudioEngine(RealtimeEventQueue& eventQueue) noexcept : eventQueue_(eventQueue) {}
+AudioEngine::AudioEngine(RealtimeEventQueue& eventQueue, PluginChain* pluginChain) noexcept
+    : eventQueue_(eventQueue), pluginChain_(pluginChain) {}
 #endif
 
 AudioEngine::~AudioEngine() {
-    outputPermitted_.store(false, std::memory_order_release);
+    cancelOutput();
     running_.store(false, std::memory_order_release);
+    if (pluginChain_ != nullptr) {
+        pluginChain_->setRunning(false);
+    }
     if (deviceService_ != nullptr) {
         deviceService_->stop();
+    }
+    waitForCallbackQuiescence();
+    if (pluginChain_ != nullptr) {
+        pluginChain_->releaseResources();
     }
 }
 
@@ -77,7 +86,12 @@ AudioResult AudioEngine::configure(const AudioConfiguration& configuration) {
         return result;
     }
 
-    prepareProcessing(configuration.sampleRate);
+    if (!prepareProcessing(configuration.sampleRate)) {
+        deviceService_->close();
+        setStatus(EngineStatus::blocked);
+        return AudioResult::failure(AudioErrorCode::invalidConfiguration,
+                                    "The plug-in chain could not be prepared.");
+    }
     configured_.store(true, std::memory_order_release);
     recoveryPending_.store(false, std::memory_order_release);
     setStatus(EngineStatus::configured);
@@ -93,7 +107,9 @@ AudioResult AudioEngine::start() {
         return AudioResult::success();
     }
     if (!configured_.load(std::memory_order_acquire) || !configurationIsValid() ||
-        deviceService_ == nullptr) {
+        deviceService_ == nullptr ||
+        (pluginChain_ != nullptr &&
+         (!pluginChain_->isPrepared() || !pluginChain_->isSessionComplete()))) {
         setStatus(EngineStatus::blocked);
         return AudioResult::failure(AudioErrorCode::engineStartFailed,
                                     "Routing requirements are incomplete.");
@@ -103,14 +119,23 @@ AudioResult AudioEngine::start() {
     masterOutput_.beginStart();
     outputPermitted_.store(false, std::memory_order_release);
     running_.store(true, std::memory_order_release);
+    if (pluginChain_ != nullptr) {
+        pluginChain_->setRunning(true);
+    }
     if (const auto result = deviceService_->start(this); !result.succeeded()) {
         running_.store(false, std::memory_order_release);
+        if (pluginChain_ != nullptr) {
+            pluginChain_->setRunning(false);
+        }
         masterOutput_.beginStop();
         setStatus(EngineStatus::blocked);
         return result;
     }
     if (!running_.load(std::memory_order_acquire) || !configurationIsValid()) {
         deviceService_->stop();
+        if (pluginChain_ != nullptr) {
+            pluginChain_->setRunning(false);
+        }
         configured_.store(false, std::memory_order_release);
         setStatus(EngineStatus::blocked);
         return AudioResult::failure(AudioErrorCode::engineStartFailed,
@@ -142,8 +167,15 @@ void AudioEngine::failClosed() noexcept {
     cancelOutput();
     configured_.store(false, std::memory_order_release);
     running_.store(false, std::memory_order_release);
+    if (pluginChain_ != nullptr) {
+        pluginChain_->setRunning(false);
+    }
     if (deviceService_ != nullptr) {
         deviceService_->close();
+    }
+    waitForCallbackQuiescence();
+    if (pluginChain_ != nullptr) {
+        pluginChain_->releaseResources();
     }
     setStatus(EngineStatus::blocked);
 }
@@ -186,6 +218,12 @@ MeterSnapshot AudioEngine::meterSnapshot() const noexcept {
 
 EngineDiagnostics AudioEngine::diagnostics() const noexcept {
     auto result = deviceService_ != nullptr ? deviceService_->diagnostics() : EngineDiagnostics{};
+    result.pluginLatencySamples = pluginChain_ != nullptr ? pluginChain_->totalLatencySamples() : 0;
+    const auto hostLatency =
+        static_cast<std::int64_t>(result.inputLatencySamples) + result.outputLatencySamples;
+    const auto aggregateLatency = hostLatency + result.pluginLatencySamples;
+    result.aggregateLatencySamples =
+        static_cast<int>(std::min<std::int64_t>(aggregateLatency, std::numeric_limits<int>::max()));
     result.callbackTimeEmaMicroseconds =
         callbackTimeEmaMicroseconds_.load(std::memory_order_relaxed);
     return result;
@@ -221,6 +259,9 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device) {
 
 void AudioEngine::audioDeviceStopped() {
     outputPermitted_.store(false, std::memory_order_release);
+    if (pluginChain_ != nullptr) {
+        pluginChain_->setRunning(false);
+    }
     if (running_.exchange(false, std::memory_order_acq_rel)) {
         configured_.store(false, std::memory_order_release);
         setStatus(EngineStatus::blocked);
@@ -232,6 +273,9 @@ void AudioEngine::audioDeviceError(const juce::String& message) {
     juce::ignoreUnused(message);
     outputPermitted_.store(false, std::memory_order_release);
     running_.store(false, std::memory_order_release);
+    if (pluginChain_ != nullptr) {
+        pluginChain_->setRunning(false);
+    }
     configured_.store(false, std::memory_order_release);
     if (deviceService_ != nullptr) {
         deviceService_->invalidateFromCallback();
@@ -314,7 +358,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(
     }
 }
 
-void AudioEngine::prepareProcessing(double sampleRate) {
+bool AudioEngine::prepareProcessing(double sampleRate) {
     workingBuffer_.setSize(2, maximumCallbackFrames, false, true, false);
     workingBuffer_.clear();
     inputMapper_.prepare(maximumCallbackFrames);
@@ -322,6 +366,15 @@ void AudioEngine::prepareProcessing(double sampleRate) {
     outputMeter_.prepare();
     outputSafety_.prepare(maximumCallbackFrames);
     masterOutput_.prepare(sampleRate);
+    midiBuffer_.clear();
+    midiBuffer_.ensureSize(4096);
+    if (pluginChain_ != nullptr) {
+        const auto result = pluginChain_->prepare(sampleRate, maximumPluginFrames);
+        if (!result.succeeded()) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void AudioEngine::servicePendingStop() noexcept {
@@ -336,11 +389,21 @@ void AudioEngine::servicePendingStop() noexcept {
 void AudioEngine::completeStop() noexcept {
     outputPermitted_.store(false, std::memory_order_release);
     running_.store(false, std::memory_order_release);
+    if (pluginChain_ != nullptr) {
+        pluginChain_->setRunning(false);
+    }
     if (deviceService_ != nullptr) {
         deviceService_->stop();
     }
+    waitForCallbackQuiescence();
     setStatus(configured_.load(std::memory_order_acquire) ? EngineStatus::configured
                                                           : EngineStatus::stopped);
+}
+
+void AudioEngine::waitForCallbackQuiescence() const noexcept {
+    while (callbackState_.load(std::memory_order_acquire) != AudioCallbackState::idle) {
+        std::this_thread::yield();
+    }
 }
 
 void AudioEngine::setStatus(EngineStatus status) noexcept {
@@ -360,6 +423,9 @@ void AudioEngine::cancelOutput() noexcept {
 void AudioEngine::requestRecovery(AudioErrorCode error) noexcept {
     cancelOutput();
     configured_.store(false, std::memory_order_release);
+    if (pluginChain_ != nullptr) {
+        pluginChain_->setRunning(false);
+    }
     if (deviceService_ != nullptr) {
         deviceService_->invalidateFromCallback();
     }
@@ -384,6 +450,9 @@ void AudioEngine::processChunk(const float* input, float* leftOutput, float* rig
                                int offset, int frames) noexcept {
     inputMapper_.mapMonoToDualMono(input + offset, frames, workingBuffer_);
     inputMeter_.accumulate(workingBuffer_, frames);
+    if (pluginChain_ != nullptr) {
+        pluginChain_->process(workingBuffer_, midiBuffer_, frames);
+    }
     outputSafety_.process(workingBuffer_, frames);
     masterOutput_.process(workingBuffer_, frames);
     outputMeter_.accumulate(workingBuffer_, frames);
@@ -400,7 +469,7 @@ bool AudioEngine::configurationIsValid() const noexcept {
 
 #ifndef NDEBUG
 void AudioEngine::prepareForTesting(double sampleRate) {
-    prepareProcessing(sampleRate);
+    static_cast<void>(prepareProcessing(sampleRate));
     configured_.store(true, std::memory_order_release);
     recoveryPending_.store(false, std::memory_order_release);
     outputPermitted_.store(false, std::memory_order_release);
@@ -417,6 +486,9 @@ void AudioEngine::setRunningForTesting(bool running) noexcept {
         outputPermitted_.store(false, std::memory_order_release);
     }
     running_.store(running, std::memory_order_release);
+    if (pluginChain_ != nullptr) {
+        pluginChain_->setRunning(running);
+    }
     setStatus(running ? EngineStatus::running : EngineStatus::configured);
 }
 

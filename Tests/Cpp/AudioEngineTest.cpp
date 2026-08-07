@@ -4,10 +4,12 @@
 #include "Audio/AudioEngine.h"
 
 #include "Audio/RealtimeSafety.h"
+#include "PluginRuntimeTestSupport.h"
 #include "TestAllocationTracker.h"
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <juce_core/juce_core.h>
 #include <limits>
@@ -165,6 +167,86 @@ class AudioEngineTest final : public juce::UnitTest {
         expectEquals(recoveryEvents, 1);
         expect(engine.callbackInvariantViolationForTesting());
         resetEngine();
+
+        beginTest("normal stop publishes quiescence only after processBlock returns");
+        shitate::RealtimeEventQueue pluginQueue;
+        shitate::PluginChain pluginChain;
+        std::atomic<bool> processEntered{false};
+        std::atomic<bool> processRelease{false};
+        std::atomic<bool> releaseEntered{false};
+        std::atomic<bool> failClosedStarted{false};
+        std::atomic<bool> failClosedFinished{false};
+        expect(pluginChain
+                   .addSlot(shitate::test::makeSlot(pluginQueue, 1,
+                                                    {.processEntered = &processEntered,
+                                                     .processRelease = &processRelease,
+                                                     .releaseEntered = &releaseEntered}))
+                   .succeeded());
+        shitate::AudioEngine pluginEngine(pluginQueue, &pluginChain);
+        pluginEngine.prepareForTesting(48000.0);
+        pluginEngine.setRunningForTesting(true);
+        pluginEngine.stop();
+        std::thread pluginCallback([&] {
+            pluginEngine.audioDeviceIOCallbackWithContext(inputChannels, 1, outputChannels, 2, 128,
+                                                          context);
+        });
+        while (!processEntered.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(60));
+        std::atomic<bool> stopServiceStarted{false};
+        std::atomic<bool> stopServiceFinished{false};
+        std::thread stopService([&] {
+            stopServiceStarted.store(true, std::memory_order_release);
+            shitate::CoreEvent ignored;
+            static_cast<void>(pluginEngine.popEvent(ignored));
+            stopServiceFinished.store(true, std::memory_order_release);
+        });
+        while (!stopServiceStarted.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        for (int attempt = 0; attempt < 1000; ++attempt) {
+            std::this_thread::yield();
+        }
+        expect(pluginEngine.status() == shitate::EngineStatus::stopping);
+        expect(!stopServiceFinished.load(std::memory_order_acquire));
+        expect(!releaseEntered.load(std::memory_order_acquire));
+        processRelease.store(true, std::memory_order_release);
+        pluginCallback.join();
+        stopService.join();
+        expect(stopServiceFinished.load(std::memory_order_acquire));
+        expect(pluginEngine.status() == shitate::EngineStatus::configured);
+        expect(!releaseEntered.load(std::memory_order_acquire));
+
+        beginTest("fail-closed waits for processBlock before releasing plug-in resources");
+        processEntered.store(false, std::memory_order_release);
+        processRelease.store(false, std::memory_order_release);
+        pluginEngine.setRunningForTesting(true);
+        std::thread failClosedCallback([&] {
+            pluginEngine.audioDeviceIOCallbackWithContext(inputChannels, 1, outputChannels, 2, 128,
+                                                          context);
+        });
+        while (!processEntered.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        std::thread failCloser([&] {
+            failClosedStarted.store(true, std::memory_order_release);
+            pluginEngine.failClosed();
+            failClosedFinished.store(true, std::memory_order_release);
+        });
+        while (!failClosedStarted.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        for (int attempt = 0; attempt < 1000; ++attempt) {
+            std::this_thread::yield();
+        }
+        expect(!releaseEntered.load(std::memory_order_acquire));
+        expect(!failClosedFinished.load(std::memory_order_acquire));
+        processRelease.store(true, std::memory_order_release);
+        failClosedCallback.join();
+        failCloser.join();
+        expect(releaseEntered.load(std::memory_order_acquire));
+        expect(failClosedFinished.load(std::memory_order_acquire));
 
         beginTest("stop fade completes asynchronously without blocking the control thread");
         engine.stop();

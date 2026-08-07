@@ -56,29 +56,48 @@ add_library(ShitateCore STATIC
   Sources/Core/Audio/MeterAccumulator.h
   Sources/Core/Audio/OutputSafetyProcessor.cpp
   Sources/Core/Audio/OutputSafetyProcessor.h
+  Sources/Core/Audio/HostedPluginSlot.cpp
+  Sources/Core/Audio/HostedPluginSlot.h
+  Sources/Core/Audio/PluginChain.cpp
+  Sources/Core/Audio/PluginChain.h
+  Sources/Core/Audio/PluginChainTypes.h
   Sources/Core/Audio/RealtimeEventQueue.cpp
   Sources/Core/Audio/RealtimeEventQueue.h
   Sources/Core/Audio/RealtimeSafety.h
   Sources/Core/Plugins/PluginCatalog.cpp
   Sources/Core/Plugins/PluginCatalog.h
+  Sources/Core/Plugins/PluginEditorWindowManager.cpp
+  Sources/Core/Plugins/PluginEditorWindowManager.h
+  Sources/Core/Plugins/PluginFactory.cpp
+  Sources/Core/Plugins/PluginFactory.h
+  Sources/Core/Plugins/PluginLoadJournal.cpp
+  Sources/Core/Plugins/PluginLoadJournal.h
+  Sources/Core/Plugins/PluginRuntimeTypes.cpp
+  Sources/Core/Plugins/PluginRuntimeTypes.h
   Sources/Core/Plugins/PluginScanCoordinator.cpp
   Sources/Core/Plugins/PluginScanCoordinator.h
   Sources/Core/Plugins/PluginScanProtocol.cpp
   Sources/Core/Plugins/PluginScanProtocol.h
   Sources/Core/Plugins/PluginScanTypes.h
   Sources/Core/Plugins/PluginSignatureVerifier.h
-  Sources/Core/Plugins/PluginSignatureVerifier.mm)
+  Sources/Core/Plugins/PluginSignatureVerifier.mm
+  external/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK/public.sdk/source/vst/hosting/module.cpp
+  external/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK/public.sdk/source/vst/hosting/module_mac.mm)
 target_include_directories(ShitateCore PUBLIC
   Sources/Core
   external/JUCE/modules)
 target_link_libraries(ShitateCore PRIVATE
   juce::juce_audio_devices
+  juce::juce_audio_processors
   juce::juce_cryptography
+  juce::juce_gui_basics
   "-framework Security")
 target_compile_definitions(ShitateCore PRIVATE
   SHITATE_DISPLAY_VERSION="${SHITATE_DISPLAY_VERSION}")
 shitate_apply_juce_definitions(ShitateCore)
 shitate_enable_warnings(ShitateCore)
+target_compile_options(ShitateCore PRIVATE
+  $<$<COMPILE_LANGUAGE:CXX,OBJCXX>:-Wno-unnecessary-virtual-specifier>)
 
 add_library(ShitateBridge STATIC
   Sources/Bridge/Public/ShitateBridge.h
@@ -138,9 +157,7 @@ add_executable(ShitatePluginScanner
   Sources/Scanner/ScanResultWriter.cpp
   Sources/Scanner/ScanResultWriter.h
   Sources/Scanner/VST3Scanner.cpp
-  Sources/Scanner/VST3Scanner.h
-  external/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK/public.sdk/source/vst/hosting/module.cpp
-  external/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK/public.sdk/source/vst/hosting/module_mac.mm)
+  Sources/Scanner/VST3Scanner.h)
 set_source_files_properties(
   external/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK/public.sdk/source/vst/hosting/module_mac.mm
   PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
@@ -223,14 +240,24 @@ if(BUILD_TESTING)
     Tests/Cpp/AudioPrimitivesTest.cpp
     Tests/Cpp/CoreVersionTest.cpp
     Tests/Cpp/DeviceServiceTest.cpp
+    Tests/Cpp/HostedPluginSlotTest.cpp
     Tests/Cpp/PluginCatalogTest.cpp
+    Tests/Cpp/PluginChainTest.cpp
+    Tests/Cpp/PluginEditorWindowManagerTest.cpp
+    Tests/Cpp/PluginFactoryTest.cpp
+    Tests/Cpp/PluginLoadJournalTest.cpp
+    Tests/Cpp/PluginRuntimeAudioTest.cpp
+    Tests/Cpp/PluginRuntimeTestSupport.h
     Tests/Cpp/PluginScanCoordinatorTest.cpp
     Tests/Cpp/PluginScanProtocolTest.cpp
     Tests/Cpp/PluginSignatureVerifierTest.cpp
     Tests/Cpp/RealtimeEventQueueTest.cpp
     Tests/Cpp/TestAllocationTracker.cpp
     Tests/Cpp/TestAllocationTracker.h)
-  target_link_libraries(ShitateCppTests PRIVATE ShitateCore juce::juce_core)
+  target_link_libraries(ShitateCppTests PRIVATE
+    ShitateCore
+    juce::juce_core
+    juce::juce_gui_basics)
   target_compile_definitions(ShitateCppTests PRIVATE JUCE_UNIT_TESTS=1)
   shitate_apply_juce_definitions(ShitateCppTests)
   shitate_enable_warnings(ShitateCppTests)
@@ -263,6 +290,23 @@ if(BUILD_TESTING)
     ShitateScannerProtocolFixture
     TestVST3Plugins)
   shitate_enable_warnings(ShitateScannerIntegrationTest)
+
+  add_executable(ShitatePluginRuntimeHost
+    Tests/Integration/PluginRuntimeHost.cpp)
+  target_link_libraries(ShitatePluginRuntimeHost PRIVATE
+    ShitateCore
+    juce::juce_audio_processors
+    juce::juce_gui_basics)
+  target_compile_definitions(ShitatePluginRuntimeHost PRIVATE
+    SHITATE_SCANNER_PATH="$<TARGET_FILE:ShitatePluginScanner>"
+    SHITATE_GAIN_PLUGIN_PATH="$<TARGET_BUNDLE_DIR:ShitateGainPlugin_VST3>")
+  add_dependencies(ShitatePluginRuntimeHost
+    ShitatePluginScanner
+    ShitateGainPlugin_VST3)
+  shitate_apply_juce_definitions(ShitatePluginRuntimeHost)
+  shitate_enable_warnings(ShitatePluginRuntimeHost)
+  target_compile_options(ShitatePluginRuntimeHost PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX,OBJCXX>:-Wno-unnecessary-virtual-specifier>)
 
   xctest_add_bundle(ShitateSwiftTests Shitate
     Sources/App/ApplicationState.swift
@@ -320,9 +364,26 @@ if(BUILD_TESTING)
     COMMAND ShitateCppTests --test PluginScanCoordinator)
   set_tests_properties(PluginScanCoordinatorTest PROPERTIES LABELS "unit;cpp;scanner")
 
+  foreach(runtime_test IN ITEMS
+      HostedPluginSlot
+      PluginChain
+      PluginEditorWindowManager
+      PluginFactory
+      PluginLoadJournal
+      PluginRuntimeAudio)
+    add_test(NAME ${runtime_test}Test COMMAND ShitateCppTests --test ${runtime_test})
+    set_tests_properties(${runtime_test}Test PROPERTIES
+      LABELS "unit;cpp;plugin-runtime-unit")
+  endforeach()
+
   add_test(NAME ScannerIntegrationTest COMMAND ShitateScannerIntegrationTest)
   set_tests_properties(ScannerIntegrationTest PROPERTIES
     LABELS "integration;scanner;signature"
+    TIMEOUT 30)
+
+  add_test(NAME PluginRuntimeIntegrationTest COMMAND ShitatePluginRuntimeHost)
+  set_tests_properties(PluginRuntimeIntegrationTest PROPERTIES
+    LABELS "integration;plugin-runtime-integration"
     TIMEOUT 30)
 
   xctest_add_test(BridgeVersionTest ShitateSwiftTests)

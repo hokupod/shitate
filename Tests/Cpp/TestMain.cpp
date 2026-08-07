@@ -3,9 +3,11 @@
 
 #include <iostream>
 #include <juce_core/juce_core.h>
+#include <juce_gui_basics/juce_gui_basics.h>
 #include <string_view>
 
 int main(int argc, char* argv[]) {
+    juce::ScopedJuceInitialiser_GUI guiInitialiser;
     juce::UnitTestRunner runner;
     runner.setAssertOnFailure(false);
 

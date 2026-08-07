@@ -15,6 +15,7 @@ namespace shitate {
 class RealtimeEventQueue final {
   public:
     static constexpr std::size_t capacity = 64;
+    static constexpr std::size_t eventTypeCount = 6;
 
     RealtimeEventQueue() noexcept;
 
@@ -38,8 +39,8 @@ class RealtimeEventQueue final {
     alignas(64) std::atomic<std::size_t> enqueuePosition_{0};
     alignas(64) std::atomic<std::size_t> dequeuePosition_{0};
     std::atomic<std::uint32_t> coalescedTypes_{0};
-    std::atomic<int> coalescedValues_[5]{};
-    std::atomic<int> coalescedErrors_[5]{};
+    std::atomic<int> coalescedValues_[eventTypeCount]{};
+    std::atomic<int> coalescedErrors_[eventTypeCount]{};
 };
 
 static_assert(std::atomic<std::size_t>::is_always_lock_free);

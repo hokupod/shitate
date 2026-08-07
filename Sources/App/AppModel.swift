@@ -78,6 +78,8 @@ struct AudioDiagnostics: Equatable {
         bufferFrames: 0,
         inputLatencySamples: 0,
         outputLatencySamples: 0,
+        pluginLatencySamples: 0,
+        aggregateLatencySamples: 0,
         xrunCount: 0,
         callbackTimeEmaMicroseconds: 0
     )
@@ -86,6 +88,8 @@ struct AudioDiagnostics: Equatable {
     let bufferFrames: Int
     let inputLatencySamples: Int
     let outputLatencySamples: Int
+    let pluginLatencySamples: Int
+    let aggregateLatencySamples: Int
     let xrunCount: Int
     let callbackTimeEmaMicroseconds: Double
 
@@ -94,6 +98,8 @@ struct AudioDiagnostics: Equatable {
         bufferFrames = value.bufferFrames
         inputLatencySamples = value.inputLatencySamples
         outputLatencySamples = value.outputLatencySamples
+        pluginLatencySamples = value.pluginLatencySamples
+        aggregateLatencySamples = value.aggregateLatencySamples
         xrunCount = value.xrunCount
         callbackTimeEmaMicroseconds = value.callbackTimeEmaMicroseconds
     }
@@ -103,6 +109,8 @@ struct AudioDiagnostics: Equatable {
         bufferFrames: Int,
         inputLatencySamples: Int,
         outputLatencySamples: Int,
+        pluginLatencySamples: Int,
+        aggregateLatencySamples: Int,
         xrunCount: Int,
         callbackTimeEmaMicroseconds: Double
     ) {
@@ -110,6 +118,8 @@ struct AudioDiagnostics: Equatable {
         self.bufferFrames = bufferFrames
         self.inputLatencySamples = inputLatencySamples
         self.outputLatencySamples = outputLatencySamples
+        self.pluginLatencySamples = pluginLatencySamples
+        self.aggregateLatencySamples = aggregateLatencySamples
         self.xrunCount = xrunCount
         self.callbackTimeEmaMicroseconds = callbackTimeEmaMicroseconds
     }

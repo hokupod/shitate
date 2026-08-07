@@ -20,6 +20,9 @@ bool RealtimeEventQueue::push(CoreEvent event) noexcept {
     }
 
     const auto index = static_cast<std::size_t>(event.type);
+    if (index >= eventTypeCount) {
+        return false;
+    }
     coalescedValues_[index].store(event.value, std::memory_order_relaxed);
     coalescedErrors_[index].store(static_cast<int>(event.error), std::memory_order_relaxed);
     coalescedTypes_.fetch_or(std::uint32_t{1} << index, std::memory_order_release);

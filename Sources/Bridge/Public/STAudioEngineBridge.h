@@ -28,14 +28,37 @@ typedef NS_ERROR_ENUM(STBridgeErrorDomain, STBridgeErrorCode){
     STBridgeErrorCodePluginScanFailed = 202,
     STBridgeErrorCodeInvalidPluginFolder = 203,
     STBridgeErrorCodePluginScannerUnavailable = 204,
+    STBridgeErrorCodeInvalidPluginDescriptor = 300,
+    STBridgeErrorCodePluginIdentityChanged = 301,
+    STBridgeErrorCodePluginJournalWriteFailed = 302,
+    STBridgeErrorCodePluginInstanceCreationFailed = 303,
+    STBridgeErrorCodePluginUnsupportedLayout = 304,
+    STBridgeErrorCodePluginStateInvalid = 305,
+    STBridgeErrorCodePluginPrepareFailed = 306,
+    STBridgeErrorCodePluginChainFull = 307,
+    STBridgeErrorCodeDuplicatePluginSlot = 308,
+    STBridgeErrorCodePluginSlotNotFound = 309,
+    STBridgeErrorCodePluginMutationRequiresStop = 310,
+    STBridgeErrorCodeInvalidPluginMove = 311,
+    STBridgeErrorCodePluginSessionIncomplete = 312,
+    STBridgeErrorCodePluginEditorUnavailable = 313,
+    STBridgeErrorCodePluginEditorThreadInvalid = 314,
+    STBridgeErrorCodePluginMutationAppliedRestartFailed = 315,
 };
 
 @class STAudioEngineBridge;
+@class STPluginDescriptor;
+@class STPluginSlotInfo;
+
+typedef void (^STPluginMutationCompletion)(NSError* _Nullable error);
+typedef void (^STPluginStateCompletion)(NSData* _Nullable state, NSError* _Nullable error);
 
 @protocol STAudioEngineBridgeDelegate <NSObject>
 - (void)audioEngineBridge:(STAudioEngineBridge*)bridge didChangeStatus:(STEngineStatus)status;
 - (void)audioEngineBridge:(STAudioEngineBridge*)bridge didReceiveError:(NSError*)error;
 - (void)audioEngineBridgeDidChangeDevices:(STAudioEngineBridge*)bridge;
+@optional
+- (void)audioEngineBridge:(STAudioEngineBridge*)bridge didFaultPluginSlotWithID:(NSUUID*)slotID;
 @end
 
 @interface STAudioEngineBridge : NSObject {
@@ -65,6 +88,27 @@ typedef NS_ERROR_ENUM(STBridgeErrorDomain, STBridgeErrorCode){
 - (void)setMasterMuted:(BOOL)muted;
 - (STMeterSnapshot*)meterSnapshot;
 - (STEngineDiagnostics*)diagnostics;
+
+/// Synchronous plug-in runtime access must occur on the main thread.
+- (BOOL)setPluginSlotWithID:(NSUUID*)slotID
+                   bypassed:(BOOL)bypassed
+                      error:(NSError* _Nullable* _Nullable)error;
+- (BOOL)openEditorForPluginSlotWithID:(NSUUID*)slotID error:(NSError* _Nullable* _Nullable)error;
+- (BOOL)closeEditorForPluginSlotWithID:(NSUUID*)slotID error:(NSError* _Nullable* _Nullable)error;
+- (NSArray<STPluginSlotInfo*>*)pluginSlots;
+
+- (void)addPluginDescriptor:(STPluginDescriptor*)descriptor
+                     slotID:(NSUUID*)slotID
+                      state:(nullable NSData*)state
+                 completion:(STPluginMutationCompletion)completion;
+- (void)removePluginSlotWithID:(NSUUID*)slotID completion:(STPluginMutationCompletion)completion;
+- (void)movePluginSlotWithID:(NSUUID*)slotID
+                     toIndex:(NSInteger)index
+                  completion:(STPluginMutationCompletion)completion;
+- (void)restoreState:(NSData*)state
+    forPluginSlotWithID:(NSUUID*)slotID
+             completion:(STPluginMutationCompletion)completion;
+- (void)saveStateForPluginSlotWithID:(NSUUID*)slotID completion:(STPluginStateCompletion)completion;
 
 - (BOOL)exerciseExceptionForTesting:(NSError* _Nullable* _Nullable)error;
 
