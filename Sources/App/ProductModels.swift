@@ -176,6 +176,10 @@ struct PluginSlotPresentation: Identifiable, Equatable, Sendable {
     var isFaulted: Bool
     let latencySamples: Int
     let hasEditor: Bool
+
+    var isEnabled: Bool {
+        !isBypassed
+    }
 }
 
 enum SessionWorkflowState: Equatable, Sendable {

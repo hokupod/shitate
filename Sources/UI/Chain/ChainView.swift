@@ -195,14 +195,18 @@ private struct PluginSlotRow: View {
             }
             Spacer()
             Toggle(
-                "Bypass",
+                slot.isEnabled ? "Enabled" : "Disabled",
                 isOn: Binding(
-                    get: { slot.isBypassed },
-                    set: { model.setPluginBypassed(slot.id, bypassed: $0) }
+                    get: { slot.isEnabled },
+                    set: { model.setPluginBypassed(slot.id, bypassed: !$0) }
                 )
             )
             .toggleStyle(.switch)
+            .fixedSize()
             .disabled(slot.isFaulted || !model.canEditPluginChain)
+            .accessibilityLabel("\(slot.name) enabled")
+            .accessibilityValue(slot.isEnabled ? "On" : "Off")
+            .help(slot.isEnabled ? "Bypass \(slot.name)" : "Enable \(slot.name)")
             Button("Edit") {
                 model.openPluginEditor(slot.id)
             }

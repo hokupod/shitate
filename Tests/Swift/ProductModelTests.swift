@@ -21,6 +21,14 @@ final class ProductModelTests: XCTestCase {
         }
     }
 
+    func testPluginEnablementIsInverseOfBypassState() {
+        let enabled = pluginSlot(isBypassed: false)
+        let bypassed = pluginSlot(isBypassed: true)
+
+        XCTAssertTrue(enabled.isEnabled)
+        XCTAssertFalse(bypassed.isEnabled)
+    }
+
     func testBlockedAndFatalStatesExplainStoppedOutputAndNextAction() {
         for state in [
             ApplicationState.blocked(.engineStartFailed),
@@ -321,6 +329,20 @@ final class ProductModelTests: XCTestCase {
         XCTAssertEqual(reduced.document.slots.map(\.slotID), [slotIDs[0], slotIDs[2]])
         XCTAssertEqual(reduced.document.slots.map(\.order), [0, 1])
         XCTAssertEqual(Set(reduced.pluginStates.keys), [slotIDs[0], slotIDs[2]])
+    }
+
+    private func pluginSlot(isBypassed: Bool) -> PluginSlotPresentation {
+        PluginSlotPresentation(
+            id: UUID(),
+            fingerprint: "fixture",
+            name: "Fixture",
+            manufacturer: "Tests",
+            version: "1.0",
+            isBypassed: isBypassed,
+            isFaulted: false,
+            latencySamples: 0,
+            hasEditor: true
+        )
     }
 
     func testConfiguredStatusCompletesAnAsynchronousStop() {
