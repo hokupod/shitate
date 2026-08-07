@@ -48,10 +48,12 @@ enum EnvironmentReadiness: Equatable {
 enum ApplicationEvent: Equatable {
     case beginEnvironmentCheck
     case environmentChecked(EnvironmentReadiness)
+    case audioConfigurationInvalid
     case startRequested
     case engineConfigured
     case engineStarted
     case engineBlocked
+    case engineFailed(BlockingIssue)
     case stopRequested
     case engineStopped
     case muteChanged(Bool)
@@ -64,53 +66,203 @@ enum ApplicationEvent: Equatable {
     case fatal(AppFailure)
 }
 
+enum ApplicationTransitionError: Error, Equatable {
+    case invalid(state: ApplicationState, event: ApplicationEvent)
+    case staleCompletion(state: ApplicationState, event: ApplicationEvent)
+}
+
+extension ApplicationTransitionError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .invalid:
+            "The requested application-state transition is not valid."
+        case .staleCompletion:
+            "A completed operation no longer matches the current application state."
+        }
+    }
+}
+
 enum ApplicationStateReducer {
-    static func reduce(_ state: ApplicationState, _ event: ApplicationEvent) -> ApplicationState {
+    static func reduce(
+        _ state: ApplicationState,
+        _ event: ApplicationEvent
+    ) throws -> ApplicationState {
         switch event {
         case .beginEnvironmentCheck:
-            return .checkingEnvironment
+            switch state {
+            case .booting, .safeMode, .checkingEnvironment, .needsBlackHole,
+                .needsMicrophonePermission, .needsAudioConfiguration, .readyStopped, .blocked:
+                return .checkingEnvironment
+            case .starting, .running, .muted, .stopping, .recovering, .fatal:
+                throw invalid(state, event)
+            }
         case .environmentChecked(let readiness):
-            return stateForEnvironment(readiness)
+            switch state {
+            case .checkingEnvironment:
+                return stateForEnvironment(readiness)
+            case .needsBlackHole, .needsMicrophonePermission, .needsAudioConfiguration,
+                .readyStopped:
+                throw stale(state, event)
+            case .booting, .safeMode, .starting, .running, .muted, .stopping, .recovering,
+                .blocked, .fatal:
+                throw invalid(state, event)
+            }
+        case .audioConfigurationInvalid:
+            switch state {
+            case .booting, .checkingEnvironment, .needsBlackHole, .needsAudioConfiguration,
+                .readyStopped, .blocked:
+                return .needsAudioConfiguration
+            case .safeMode, .needsMicrophonePermission, .starting, .running, .muted, .stopping,
+                .recovering, .fatal:
+                throw invalid(state, event)
+            }
         case .startRequested:
-            return state == .readyStopped ? .starting : state
+            switch state {
+            case .readyStopped:
+                return .starting
+            case .starting:
+                return .starting
+            case .booting, .safeMode, .checkingEnvironment, .needsBlackHole,
+                .needsMicrophonePermission, .needsAudioConfiguration, .running, .muted,
+                .stopping, .recovering, .blocked, .fatal:
+                throw invalid(state, event)
+            }
         case .engineConfigured:
-            return state == .stopping || state == .readyStopped ? .readyStopped : state
+            switch state {
+            case .checkingEnvironment, .needsAudioConfiguration, .readyStopped:
+                return .readyStopped
+            case .starting, .running, .muted, .stopping:
+                return state
+            case .booting, .safeMode, .needsBlackHole, .needsMicrophonePermission, .recovering,
+                .blocked, .fatal:
+                throw invalid(state, event)
+            }
         case .engineStarted:
-            return state == .starting || state == .running || state == .muted
-                ? .running : .blocked(.unexpectedEngineState)
+            switch state {
+            case .starting, .running:
+                return .running
+            case .muted:
+                return .muted
+            case .readyStopped, .stopping:
+                throw stale(state, event)
+            case .booting, .safeMode, .checkingEnvironment, .needsBlackHole,
+                .needsMicrophonePermission, .needsAudioConfiguration, .recovering, .blocked,
+                .fatal:
+                throw invalid(state, event)
+            }
         case .engineBlocked:
             switch state {
             case .safeMode, .needsBlackHole, .needsMicrophonePermission,
                 .needsAudioConfiguration, .blocked, .fatal:
                 return state
-            default:
+            case .booting, .checkingEnvironment, .readyStopped, .starting, .running, .muted,
+                .stopping, .recovering:
                 return .blocked(.engineStartFailed)
             }
-        case .stopRequested, .sleep:
-            return state == .starting || state == .running || state == .muted ? .stopping : state
+        case .engineFailed(let issue):
+            switch state {
+            case .safeMode, .fatal:
+                return state
+            case .booting, .checkingEnvironment, .needsBlackHole,
+                .needsMicrophonePermission, .needsAudioConfiguration, .readyStopped, .starting,
+                .running, .muted, .stopping, .recovering, .blocked:
+                return .blocked(issue)
+            }
+        case .stopRequested:
+            switch state {
+            case .starting, .running, .muted:
+                return .stopping
+            case .readyStopped, .stopping:
+                return state
+            case .booting, .safeMode, .checkingEnvironment, .needsBlackHole,
+                .needsMicrophonePermission, .needsAudioConfiguration, .recovering, .blocked,
+                .fatal:
+                throw invalid(state, event)
+            }
         case .engineStopped:
-            if state == .stopping || state == .readyStopped {
+            switch state {
+            case .stopping, .readyStopped:
                 return .readyStopped
+            case .starting, .running, .muted:
+                return .blocked(.unexpectedEngineState)
+            case .safeMode, .checkingEnvironment, .needsBlackHole,
+                .needsMicrophonePermission, .needsAudioConfiguration, .blocked, .fatal:
+                return state
+            case .booting, .recovering:
+                throw invalid(state, event)
             }
-            return .blocked(.unexpectedEngineState)
         case .muteChanged(let muted):
-            if muted, state == .starting || state == .running {
+            switch (state, muted) {
+            case (.starting, true), (.running, true), (.muted, true):
                 return .muted
-            }
-            if !muted, state == .muted {
+            case (.muted, false):
                 return .running
+            case (.starting, false), (.running, false):
+                return state
+            case (.booting, _), (.safeMode, _), (.checkingEnvironment, _),
+                (.needsBlackHole, _), (.needsMicrophonePermission, _),
+                (.needsAudioConfiguration, _), (.readyStopped, _), (.stopping, _),
+                (.recovering, _), (.blocked, _), (.fatal, _):
+                throw invalid(state, event)
             }
-            return state
         case .inputDeviceRemoved:
-            return .blocked(.inputDeviceMissing)
+            switch state {
+            case .fatal:
+                return state
+            case .booting, .safeMode, .checkingEnvironment, .needsBlackHole,
+                .needsMicrophonePermission, .needsAudioConfiguration, .readyStopped, .starting,
+                .running, .muted, .stopping, .recovering, .blocked:
+                return .blocked(.inputDeviceMissing)
+            }
         case .blackHoleRemoved:
-            return .needsBlackHole
+            switch state {
+            case .fatal:
+                return state
+            case .booting, .safeMode, .checkingEnvironment, .needsBlackHole,
+                .needsMicrophonePermission, .needsAudioConfiguration, .readyStopped, .starting,
+                .running, .muted, .stopping, .recovering, .blocked:
+                return .needsBlackHole
+            }
         case .microphonePermissionLost:
-            return .needsMicrophonePermission
+            switch state {
+            case .fatal:
+                return state
+            case .booting, .safeMode, .checkingEnvironment, .needsBlackHole,
+                .needsMicrophonePermission, .needsAudioConfiguration, .readyStopped, .starting,
+                .running, .muted, .stopping, .recovering, .blocked:
+                return .needsMicrophonePermission
+            }
+        case .sleep:
+            switch state {
+            case .starting, .running, .muted:
+                return .stopping
+            case .booting, .safeMode, .checkingEnvironment, .needsBlackHole,
+                .needsMicrophonePermission, .needsAudioConfiguration, .readyStopped, .stopping,
+                .recovering, .blocked, .fatal:
+                return state
+            }
         case .recoveryStarted:
-            return .recovering
+            switch state {
+            case .safeMode, .blocked:
+                return .recovering
+            case .recovering:
+                return .recovering
+            case .booting, .checkingEnvironment, .needsBlackHole, .needsMicrophonePermission,
+                .needsAudioConfiguration, .readyStopped, .starting, .running, .muted, .stopping,
+                .fatal:
+                throw invalid(state, event)
+            }
         case .recoveryCompleted:
-            return state == .recovering ? .readyStopped : .blocked(.unexpectedEngineState)
+            switch state {
+            case .recovering:
+                return .readyStopped
+            case .readyStopped:
+                return .readyStopped
+            case .booting, .safeMode, .checkingEnvironment, .needsBlackHole,
+                .needsMicrophonePermission, .needsAudioConfiguration, .starting, .running,
+                .muted, .stopping, .blocked, .fatal:
+                throw invalid(state, event)
+            }
         case .fatal(let error):
             return .fatal(error)
         }
@@ -127,5 +279,19 @@ enum ApplicationStateReducer {
         case .ready:
             .readyStopped
         }
+    }
+
+    private static func invalid(
+        _ state: ApplicationState,
+        _ event: ApplicationEvent
+    ) -> ApplicationTransitionError {
+        .invalid(state: state, event: event)
+    }
+
+    private static func stale(
+        _ state: ApplicationState,
+        _ event: ApplicationEvent
+    ) -> ApplicationTransitionError {
+        .staleCompletion(state: state, event: event)
     }
 }

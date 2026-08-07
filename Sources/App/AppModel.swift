@@ -160,6 +160,7 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     var diagnostics: AudioDiagnostics = .empty
     var isMuted = false
     var lastError: String?
+    var lastTransitionError: ApplicationTransitionError?
     var pluginCatalogError: String?
     var canAcceptDetectedBlackHole = false
 
@@ -330,7 +331,9 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     }
 
     func refreshEnvironment(acceptDetectedBlackHole: Bool = false) {
-        state = ApplicationStateReducer.reduce(state, .beginEnvironmentCheck)
+        guard apply(.beginEnvironmentCheck) == .checkingEnvironment else {
+            return
+        }
         reloadDeviceCatalog()
 
         var savedUID = blackHoleUID
@@ -344,27 +347,18 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         ) {
         case .missing:
             lastError = "BlackHole 2ch is not available. Routing remains silent."
-            state = ApplicationStateReducer.reduce(
-                state,
-                .environmentChecked(.blackHoleMissing)
-            )
+            apply(.environmentChecked(.blackHoleMissing))
             return
         case .ambiguous:
             lastError =
                 "Multiple BlackHole 2ch devices were found. Remove the duplicate before routing."
-            state = ApplicationStateReducer.reduce(
-                state,
-                .environmentChecked(.blackHoleMissing)
-            )
+            apply(.environmentChecked(.blackHoleMissing))
             return
         case .identityChanged:
             canAcceptDetectedBlackHole = true
             lastError =
                 "The saved BlackHole 2ch identity changed. Confirm the detected device before routing."
-            state = ApplicationStateReducer.reduce(
-                state,
-                .environmentChecked(.blackHoleMissing)
-            )
+            apply(.environmentChecked(.blackHoleMissing))
             return
         case .available(let uid):
             blackHoleUID = uid
@@ -372,18 +366,12 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         }
 
         guard permissionFlow.status == .authorized else {
-            state = ApplicationStateReducer.reduce(
-                state,
-                .environmentChecked(.microphonePermissionMissing)
-            )
+            apply(.environmentChecked(.microphonePermissionMissing))
             return
         }
 
         guard configurationValues() != nil else {
-            state = ApplicationStateReducer.reduce(
-                state,
-                .environmentChecked(.audioConfigurationMissing)
-            )
+            apply(.environmentChecked(.audioConfigurationMissing))
             return
         }
         applyAudioSettings()
@@ -394,7 +382,7 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         if status == .authorized {
             refreshEnvironment()
         } else {
-            state = .needsMicrophonePermission
+            apply(.microphonePermissionLost)
         }
     }
 
@@ -408,11 +396,11 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
 
     func applyAudioSettings() {
         guard permissionFlow.status == .authorized else {
-            state = .needsMicrophonePermission
+            apply(.microphonePermissionLost)
             return
         }
         guard let values = configurationValues() else {
-            state = .needsAudioConfiguration
+            apply(.audioConfigurationInvalid)
             return
         }
 
@@ -430,7 +418,7 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
             bridge.setMasterMuted(isMuted)
             persistConfiguration()
             lastError = nil
-            state = .readyStopped
+            apply(.engineConfigured)
         } catch {
             handleBridgeError(error as NSError)
         }
@@ -438,14 +426,13 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
 
     func startRouting() {
         guard permissionFlow.status == .authorized else {
-            state = .needsMicrophonePermission
+            apply(.microphonePermissionLost)
             return
         }
-        let next = ApplicationStateReducer.reduce(state, .startRequested)
+        let next = apply(.startRequested)
         guard next == .starting else {
             return
         }
-        state = next
         do {
             try bridge.start()
         } catch {
@@ -454,11 +441,11 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     }
 
     func stopRouting() {
-        let next = ApplicationStateReducer.reduce(state, .stopRequested)
-        guard next != state else {
+        let previous = state
+        let next = apply(.stopRequested)
+        guard next != previous else {
             return
         }
-        state = next
         bridge.stop()
     }
 
@@ -468,7 +455,7 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         }
         isMuted.toggle()
         bridge.setMasterMuted(isMuted)
-        state = ApplicationStateReducer.reduce(state, .muteChanged(isMuted))
+        apply(.muteChanged(isMuted))
     }
 
     func markAudioSettingsDirty() {
@@ -478,7 +465,7 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         switch state {
         case .readyStopped, .blocked:
             lastError = nil
-            state = .needsAudioConfiguration
+            apply(.audioConfigurationInvalid)
         default:
             break
         }
@@ -584,13 +571,12 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         }
         isMuted = false
         lastError = "Microphone access was revoked. Routing stopped safely."
-        state = ApplicationStateReducer.reduce(state, .microphonePermissionLost)
+        apply(.microphonePermissionLost)
     }
 
     private func handleWillSleep() {
         let wasRouting = isRoutingActive
-        let next = ApplicationStateReducer.reduce(state, .sleep)
-        state = next
+        apply(.sleep)
         if wasRouting {
             bridge.stop()
         }
@@ -603,27 +589,27 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     private func handleEngineStatus(_ status: STEngineStatus) {
         switch status {
         case .stopped:
-            state = ApplicationStateReducer.reduce(state, .engineStopped)
+            apply(.engineStopped)
         case .configured:
-            state = ApplicationStateReducer.reduce(state, .engineConfigured)
+            apply(.engineConfigured)
         case .starting:
             if state == .readyStopped {
-                state = .starting
+                apply(.startRequested)
             }
         case .running:
             isMuted = false
-            state = ApplicationStateReducer.reduce(state, .engineStarted)
+            apply(.engineStarted)
         case .muted:
             isMuted = true
-            state = ApplicationStateReducer.reduce(state, .muteChanged(true))
+            apply(.muteChanged(true))
         case .stopping:
             if state == .running || state == .muted || state == .starting {
-                state = .stopping
+                apply(.stopRequested)
             }
         case .blocked:
-            state = ApplicationStateReducer.reduce(state, .engineBlocked)
+            apply(.engineBlocked)
         @unknown default:
-            state = .blocked(.unexpectedEngineState)
+            apply(.engineFailed(.unexpectedEngineState))
         }
     }
 
@@ -631,24 +617,25 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         lastError = error.localizedDescription
         switch error.code {
         case STBridgeError.Code.blackHoleMissing.rawValue:
-            state = .needsBlackHole
+            apply(.blackHoleRemoved)
         case STBridgeError.Code.outputDeviceMissing.rawValue:
-            state =
-                routingMode == .automaticPrivateAggregate
-                ? .needsBlackHole
-                : .blocked(.outputDeviceMissing)
+            if routingMode == .automaticPrivateAggregate {
+                apply(.blackHoleRemoved)
+            } else {
+                apply(.engineFailed(.outputDeviceMissing))
+            }
         case STBridgeError.Code.microphonePermissionDenied.rawValue:
-            state = .needsMicrophonePermission
+            apply(.microphonePermissionLost)
         case STBridgeError.Code.inputDeviceMissing.rawValue:
-            state = .blocked(.inputDeviceMissing)
+            apply(.engineFailed(.inputDeviceMissing))
         case STBridgeError.Code.unsupportedSampleRate.rawValue:
-            state = .blocked(.unsupportedSampleRate)
+            apply(.engineFailed(.unsupportedSampleRate))
         case STBridgeError.Code.unsupportedBufferSize.rawValue:
-            state = .blocked(.unsupportedBufferSize)
+            apply(.engineFailed(.unsupportedBufferSize))
         case STBridgeError.Code.aggregateDeviceCreationFailed.rawValue:
-            state = .blocked(.aggregateDeviceCreationFailed)
+            apply(.engineFailed(.aggregateDeviceCreationFailed))
         default:
-            state = .blocked(.engineStartFailed)
+            apply(.engineFailed(.engineStartFailed))
         }
     }
 
@@ -686,27 +673,27 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         case .missing:
             canAcceptDetectedBlackHole = false
             lastError = "BlackHole 2ch is not available. Routing remains silent."
-            state = .needsBlackHole
+            apply(.blackHoleRemoved)
         case .ambiguous:
             canAcceptDetectedBlackHole = false
             lastError =
                 "Multiple BlackHole 2ch devices were found. Remove the duplicate before routing."
-            state = .needsBlackHole
+            apply(.blackHoleRemoved)
         case .identityChanged:
             canAcceptDetectedBlackHole = true
             lastError =
                 "The saved BlackHole 2ch identity changed. Confirm the detected device before routing."
-            state = .needsBlackHole
+            apply(.blackHoleRemoved)
         case .available(let uid):
             canAcceptDetectedBlackHole = false
             blackHoleUID = uid
             defaults.set(uid, forKey: DefaultsKey.blackHoleUID)
             if selectedInputUID != nil, selectedInput == nil {
                 lastError = "The selected input device is no longer available."
-                state = .needsAudioConfiguration
+                apply(.audioConfigurationInvalid)
             } else if state == .needsBlackHole {
                 lastError = "BlackHole 2ch is available. Review Audio Settings before routing."
-                state = .needsAudioConfiguration
+                apply(.audioConfigurationInvalid)
             }
         }
     }
@@ -715,5 +702,21 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         let devices = bridge.audioDevices().map(AudioDevice.init)
         inputDevices = devices.filter { !$0.inputChannelNames.isEmpty }
         outputDevices = devices.filter { !$0.outputChannelNames.isEmpty }
+    }
+
+    @discardableResult
+    private func apply(_ event: ApplicationEvent) -> ApplicationState {
+        do {
+            let next = try ApplicationStateReducer.reduce(state, event)
+            state = next
+            lastTransitionError = nil
+            return next
+        } catch let error as ApplicationTransitionError {
+            lastTransitionError = error
+            return state
+        } catch {
+            state = .fatal(.bridge(error.localizedDescription))
+            return state
+        }
     }
 }

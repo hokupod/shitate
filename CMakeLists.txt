@@ -127,8 +127,11 @@ add_executable(Shitate MACOSX_BUNDLE
   Sources/App/ShitateApp.swift
   Sources/Services/MicrophonePermissionService.swift
   Sources/Services/Persistence/AtomicFileWriter.swift
+  Sources/Services/Persistence/PersistenceModels.swift
   Sources/Services/Persistence/PluginCatalogService.swift
   Sources/Services/Persistence/PluginCatalogStore.swift
+  Sources/Services/Persistence/SecurePersistence.swift
+  Sources/Services/Persistence/SessionStore.swift
   Sources/Services/WorkspaceEventService.swift
   Sources/UI/AudioRoutingView.swift)
 target_link_libraries(Shitate PRIVATE
@@ -313,15 +316,21 @@ if(BUILD_TESTING)
     Sources/App/AudioDevice.swift
     Sources/Services/MicrophonePermissionService.swift
     Sources/Services/Persistence/AtomicFileWriter.swift
+    Sources/Services/Persistence/PersistenceModels.swift
     Sources/Services/Persistence/PluginCatalogService.swift
     Sources/Services/Persistence/PluginCatalogStore.swift
+    Sources/Services/Persistence/SecurePersistence.swift
+    Sources/Services/Persistence/SessionStore.swift
     Sources/Services/WorkspaceEventService.swift
     Tests/Swift/ApplicationStateTests.swift
+    Tests/Swift/AtomicFileWriterTests.swift
     Tests/Swift/AudioEnvironmentTests.swift
     Tests/Swift/BridgeVersionTests.swift
     Tests/Swift/MicrophonePermissionTests.swift
+    Tests/Swift/PersistenceStoreTests.swift
     Tests/Swift/PluginBundleDiscoveryTests.swift
     Tests/Swift/PluginCatalogStoreTests.swift
+    Tests/Swift/SessionStoreTests.swift
     Tests/Swift/WorkspaceEventServiceTests.swift)
   target_link_libraries(ShitateSwiftTests PRIVATE
     ShitateBridge
@@ -387,7 +396,8 @@ if(BUILD_TESTING)
     TIMEOUT 30)
 
   xctest_add_test(BridgeVersionTest ShitateSwiftTests)
-  set_tests_properties(BridgeVersionTest PROPERTIES LABELS "unit;swift;audio-unit")
+  set_tests_properties(BridgeVersionTest PROPERTIES
+    LABELS "unit;swift;audio-unit;swift-state;persistence;ui-integration")
 
   add_test(NAME AudioHardwareIntegrationTest COMMAND ShitateAudioHardwareTest)
   set_tests_properties(AudioHardwareIntegrationTest PROPERTIES
