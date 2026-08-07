@@ -17,6 +17,7 @@
           git
           gnugrep
           gnutar
+          imagemagick
           jq
           ninja
           nixfmt

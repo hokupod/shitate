@@ -168,7 +168,13 @@ set_target_properties(ShitateBridge PROPERTIES
 configure_file(resources/Info.plist.in resources/Info.plist @ONLY)
 configure_file(resources/Scanner-Info.plist.in resources/Scanner-Info.plist @ONLY)
 
+set(SHITATE_APP_ICON "${CMAKE_SOURCE_DIR}/resources/Shitate.icon")
+set_source_files_properties("${SHITATE_APP_ICON}" PROPERTIES
+  MACOSX_PACKAGE_LOCATION "Resources"
+  XCODE_EXPLICIT_FILE_TYPE "folder.iconcomposer.icon")
+
 add_executable(Shitate MACOSX_BUNDLE
+  "${SHITATE_APP_ICON}"
   Sources/App/AppDelegate.swift
   Sources/App/AppModel+Persistence.swift
   Sources/App/AppModel+Plugins.swift
@@ -217,6 +223,7 @@ set_target_properties(Shitate PROPERTIES
   MACOSX_BUNDLE_BUNDLE_NAME "Shi-tate"
   MACOSX_BUNDLE_GUI_IDENTIFIER "dev.hokupod.shitate"
   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/resources/Info.plist"
+  XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "Shitate"
   XCODE_ATTRIBUTE_CLANG_CXX_LANGUAGE_STANDARD "c++20"
   XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/resources/Shitate.entitlements"
   XCODE_ATTRIBUTE_CODE_SIGN_INJECT_BASE_ENTITLEMENTS "NO"
@@ -540,6 +547,15 @@ if(BUILD_TESTING)
   set_tests_properties(BundleLayoutTest PROPERTIES
     DEPENDS ScannerArgumentsTest
     LABELS "integration;bundle")
+
+  add_test(NAME AppIconAssetsTest
+    COMMAND "${CMAKE_SOURCE_DIR}/Tests/Integration/AppIconAssetsTest.sh"
+      "${CMAKE_SOURCE_DIR}/scripts/generate-app-icon.sh"
+      "${CMAKE_SOURCE_DIR}/resources/AppIcon/Shitate-source.jpg"
+      "${CMAKE_SOURCE_DIR}/resources/Shitate.icon/Assets/Shitate.png"
+      "${CMAKE_SOURCE_DIR}/resources/Shitate.icon/icon.json")
+  set_tests_properties(AppIconAssetsTest PROPERTIES
+    LABELS "integration;bundle;assets")
 
   add_test(NAME SecurityPolicyTest
     COMMAND "${CMAKE_SOURCE_DIR}/Tests/Integration/SecurityPolicyTest.sh"

@@ -13,6 +13,8 @@ required_files=(
   "$app_bundle/Contents/Info.plist"
   "$app_executable"
   "$helper"
+  "$resources/Shitate.icns"
+  "$resources/Assets.car"
   "$resources/LICENSE"
   "$resources/THIRD_PARTY_NOTICES.md"
   "$resources/JUCE-LICENSE.md"
@@ -69,3 +71,52 @@ if [[ "$bundle_executable" != "Shi-tate" ]]; then
   printf 'unexpected CFBundleExecutable: %s\n' "$bundle_executable" >&2
   exit 1
 fi
+
+bundle_icon_file=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' \
+  "$app_bundle/Contents/Info.plist")
+bundle_icon_name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' \
+  "$app_bundle/Contents/Info.plist")
+if [[ "$bundle_icon_file" != "Shitate" || "$bundle_icon_name" != "Shitate" ]]; then
+  printf 'unexpected app icon metadata: file=%s name=%s\n' \
+    "$bundle_icon_file" "$bundle_icon_name" >&2
+  exit 1
+fi
+
+temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/shitate-bundle-icon.XXXXXX")
+cleanup() {
+  rm -rf -- "$temporary_directory"
+}
+trap cleanup EXIT
+
+iconset="$temporary_directory/Shitate.iconset"
+/usr/bin/iconutil --convert iconset --output "$iconset" \
+  "$resources/Shitate.icns"
+
+shopt -s nullglob
+icon_representations=("$iconset"/*.png)
+shopt -u nullglob
+if [[ "${#icon_representations[@]}" -eq 0 ]]; then
+  printf 'compiled legacy app icon has no PNG representations\n' >&2
+  exit 1
+fi
+
+for icon in "${icon_representations[@]}"; do
+  read -r width height < <(magick identify -format '%w %h\n' "$icon")
+  last_x=$((width - 1))
+  last_y=$((height - 1))
+  center_x=$((width / 2))
+  center_y=$((height / 2))
+  read -r top_left top_right bottom_left bottom_right center < <(
+    magick "$icon" -format \
+      "%[fx:p{0,0}.a==0] %[fx:p{$last_x,0}.a==0] \
+%[fx:p{0,$last_y}.a==0] %[fx:p{$last_x,$last_y}.a==0] \
+%[fx:p{$center_x,$center_y}.a>0.9]\n" info:
+  )
+  if [[ "$top_left" != 1 || "$top_right" != 1 \
+    || "$bottom_left" != 1 || "$bottom_right" != 1 \
+    || "$center" != 1 ]]; then
+    printf 'compiled legacy app icon has an invalid alpha mask: %s\n' \
+      "$icon" >&2
+    exit 1
+  fi
+done
