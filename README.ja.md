@@ -50,7 +50,9 @@ SwiftUIが製品UIとローカル状態を担当します。薄いObjective-C++ 
 C++20/JUCE audio coreを分離します。main targetは`Shitate`、配布アプリ名は
 `Shi-tate.app`です。
 
-[Canonical詳細設計](docs/design.md)を参照してください。
+[実装アーキテクチャ](docs/architecture.md)、
+[脅威モデル](docs/threat-model.md)、[Canonical詳細設計](docs/design.md)を
+参照してください。
 
 ## 必要環境
 
@@ -104,16 +106,38 @@ routingを開始します。`Control-Shift-M`はAccessibility権限なしでmast
 hardware・製品導線ごとの検証済み／未検証evidenceは
 [Manual audio QA](docs/manual-qa.md)を参照してください。
 
+## 将来の署名済みreleaseを検証する
+
+現在、署名済みreleaseはありません。公開後は、同じ承認済みreleaseからDMGと
+隣接するchecksumを取得し、開く前に検証してください。
+
+```bash
+shasum -a 256 -c Shi-tate_0.1.0_arm64.dmg.sha256
+spctl --assess --type open --context context:primary-signature --verbose=4 \
+  Shi-tate_0.1.0_arm64.dmg
+```
+
+Applicationsへdrag後、
+`spctl --assess --type execute --verbose=4 /Applications/Shi-tate.app`でも
+再検証します。いずれかが失敗した場合はGatekeeperを迂回しないでください。
+releaseにはrecursive `shitate-0.1.0-source.tar.zst`とSHA-256も含まれます。
+GitHubの自動source archiveはJUCE内容を欠くため、対応sourceではありません。
+
 ## プライバシーとセキュリティ
 
 Shi-tateは音声保存、telemetry、crash upload、analytics、remote configuration、
 plugin download、アプリ本体の外部通信を実装しません。shellや管理者権限も要求
 しません。デバイス障害時に別入力やspeakerへ暗黙切替しません。
 
+local非同期logはowner-onlyで、5 MiBと3世代rotationに制限し、home pathと
+device UIDをredactします。`Copy Diagnostics`は明示的なclipboard操作であり、
+reportを送信または自動保存しません。
+
 VST3は未信頼のnative codeです。scanは隔離しますが、v0.1のruntime pluginは
 main app内で実行され、利用者権限でcrash、hang、file access、network accessを
-起こし得ます。信頼できるpluginだけを利用してください。[SECURITY.md](SECURITY.md)
-も参照してください。
+起こし得ます。user VST3対応のためApp Sandboxを無効にし、app/scannerでは
+Library Validationも無効にしています。Hardened Runtimeはpluginを隔離しません。
+信頼できるpluginだけを利用してください。[SECURITY.md](SECURITY.md)も参照してください。
 
 ## ライセンスと第三者コンポーネント
 

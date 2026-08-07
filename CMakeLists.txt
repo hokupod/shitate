@@ -33,10 +33,59 @@ if(NOT SHITATE_DISPLAY_VERSION STREQUAL "${PROJECT_VERSION}-dev")
     "VERSION (${SHITATE_DISPLAY_VERSION}) must match project version (${PROJECT_VERSION}-dev)")
 endif()
 
+if(EXISTS "${CMAKE_SOURCE_DIR}/SOURCE-METADATA.json")
+  file(READ "${CMAKE_SOURCE_DIR}/SOURCE-METADATA.json" SHITATE_SOURCE_METADATA)
+  string(JSON SHITATE_SOURCE_SCHEMA GET "${SHITATE_SOURCE_METADATA}" schemaVersion)
+  string(JSON SHITATE_GIT_COMMIT GET "${SHITATE_SOURCE_METADATA}" commit)
+  string(JSON SHITATE_SOURCE_VERSION GET "${SHITATE_SOURCE_METADATA}" version)
+  if(NOT SHITATE_SOURCE_SCHEMA EQUAL 1 OR
+     NOT SHITATE_SOURCE_VERSION STREQUAL PROJECT_VERSION)
+    message(FATAL_ERROR
+      "Source archive metadata must use schema 1 and version ${PROJECT_VERSION}")
+  endif()
+else()
+  execute_process(
+    COMMAND git rev-parse --show-toplevel
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE SHITATE_GIT_TOP_LEVEL
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+  file(REAL_PATH "${CMAKE_SOURCE_DIR}" SHITATE_SOURCE_REAL_PATH)
+  set(SHITATE_GIT_REAL_PATH "")
+  if(SHITATE_GIT_TOP_LEVEL)
+    file(REAL_PATH "${SHITATE_GIT_TOP_LEVEL}" SHITATE_GIT_REAL_PATH)
+  endif()
+  if(SHITATE_GIT_REAL_PATH STREQUAL SHITATE_SOURCE_REAL_PATH)
+    execute_process(
+      COMMAND git rev-parse --verify HEAD
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      OUTPUT_VARIABLE SHITATE_GIT_COMMIT
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET)
+  endif()
+endif()
+string(LENGTH "${SHITATE_GIT_COMMIT}" SHITATE_GIT_COMMIT_LENGTH)
+if(NOT SHITATE_GIT_COMMIT_LENGTH EQUAL 40 OR
+   NOT SHITATE_GIT_COMMIT MATCHES "^[0-9a-f]+$")
+  set(SHITATE_GIT_COMMIT "unknown")
+endif()
+
 set(JUCE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(JUCE_BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
 set(JUCE_ENABLE_MODULE_SOURCE_GROUPS OFF CACHE BOOL "" FORCE)
 add_subdirectory(external/JUCE)
+
+# juce_audio_processors depends on juce_gui_extra for native plug-in editors.
+# JUCE_WEB_BROWSER=0 compiles out the browser implementation, so remove the
+# module metadata's unconditional WebKit link to preserve the no-network
+# release boundary.
+get_target_property(SHITATE_JUCE_GUI_EXTRA_LINKS
+  juce_gui_extra INTERFACE_LINK_LIBRARIES)
+if(SHITATE_JUCE_GUI_EXTRA_LINKS)
+  list(FILTER SHITATE_JUCE_GUI_EXTRA_LINKS EXCLUDE REGEX "WebKit")
+  set_property(TARGET juce_gui_extra PROPERTY
+    INTERFACE_LINK_LIBRARIES "${SHITATE_JUCE_GUI_EXTRA_LINKS}")
+endif()
 
 add_library(ShitateCore STATIC
   Sources/Core/ApplicationCore.cpp
@@ -123,6 +172,8 @@ add_executable(Shitate MACOSX_BUNDLE
   Sources/App/AppDelegate.swift
   Sources/App/AppModel+Persistence.swift
   Sources/App/AppModel+Plugins.swift
+  Sources/App/AppModel+Recovery.swift
+  Sources/App/AppModel+Diagnostics.swift
   Sources/App/ApplicationState.swift
   Sources/App/AppModel.swift
   Sources/App/AudioDevice.swift
@@ -132,6 +183,8 @@ add_executable(Shitate MACOSX_BUNDLE
   Sources/Services/GlobalHotKeyService.swift
   Sources/Services/LaunchAtLoginService.swift
   Sources/Services/MicrophonePermissionService.swift
+  Sources/Services/DiagnosticService.swift
+  Sources/Services/RunStateService.swift
   Sources/Services/Persistence/AtomicFileWriter.swift
   Sources/Services/Persistence/PersistenceModels.swift
   Sources/Services/Persistence/PluginCatalogService.swift
@@ -147,6 +200,7 @@ add_executable(Shitate MACOSX_BUNDLE
   Sources/UI/MenuBarView.swift
   Sources/UI/Onboarding/OnboardingView.swift
   Sources/UI/Plugins/PluginsView.swift
+  Sources/UI/Recovery/SafeModeView.swift
   Sources/UI/Settings/SettingsView.swift
   Sources/UI/Shared/ProductComponents.swift)
 target_link_libraries(Shitate PRIVATE
@@ -154,8 +208,10 @@ target_link_libraries(Shitate PRIVATE
   "-framework AppKit"
   "-framework AVFoundation"
   "-framework Carbon"
+  "-framework CryptoKit"
   "-framework ServiceManagement"
   "-framework SwiftUI")
+target_link_options(Shitate PRIVATE "LINKER:-dead_strip")
 set_target_properties(Shitate PROPERTIES
   OUTPUT_NAME "Shi-tate"
   MACOSX_BUNDLE_BUNDLE_NAME "Shi-tate"
@@ -163,6 +219,8 @@ set_target_properties(Shitate PROPERTIES
   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/resources/Info.plist"
   XCODE_ATTRIBUTE_CLANG_CXX_LANGUAGE_STANDARD "c++20"
   XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/resources/Shitate.entitlements"
+  XCODE_ATTRIBUTE_CODE_SIGN_INJECT_BASE_ENTITLEMENTS "NO"
+  XCODE_ATTRIBUTE_ENABLE_APP_SANDBOX "NO"
   XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME "YES"
   XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "dev.hokupod.shitate"
   XCODE_ATTRIBUTE_SWIFT_OBJC_BRIDGING_HEADER
@@ -186,6 +244,7 @@ target_link_libraries(ShitatePluginScanner PRIVATE
   ShitateCore
   juce::juce_audio_processors
   juce::juce_gui_basics)
+target_link_options(ShitatePluginScanner PRIVATE "LINKER:-dead_strip")
 shitate_apply_juce_definitions(ShitatePluginScanner)
 shitate_enable_warnings(ShitatePluginScanner)
 target_compile_options(ShitatePluginScanner PRIVATE
@@ -194,6 +253,8 @@ set_target_properties(ShitatePluginScanner PROPERTIES
   OUTPUT_NAME "ShitatePluginScanner"
   XCODE_ATTRIBUTE_CLANG_CXX_LANGUAGE_STANDARD "c++20"
   XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/resources/Scanner.entitlements"
+  XCODE_ATTRIBUTE_CODE_SIGN_INJECT_BASE_ENTITLEMENTS "NO"
+  XCODE_ATTRIBUTE_ENABLE_APP_SANDBOX "NO"
   XCODE_ATTRIBUTE_CREATE_INFOPLIST_SECTION_IN_BINARY "YES"
   XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME "YES"
   XCODE_ATTRIBUTE_INFOPLIST_FILE "${CMAKE_BINARY_DIR}/resources/Scanner-Info.plist"
@@ -319,18 +380,38 @@ if(BUILD_TESTING)
     juce::juce_gui_basics)
   target_compile_definitions(ShitatePluginRuntimeHost PRIVATE
     SHITATE_SCANNER_PATH="$<TARGET_FILE:ShitatePluginScanner>"
-    SHITATE_GAIN_PLUGIN_PATH="$<TARGET_BUNDLE_DIR:ShitateGainPlugin_VST3>")
+    SHITATE_GAIN_PLUGIN_PATH="$<TARGET_BUNDLE_DIR:ShitateGainPlugin_VST3>"
+    SHITATE_CRASH_PLUGIN_PATH="$<TARGET_BUNDLE_DIR:ShitateCrashPlugin_VST3>")
   add_dependencies(ShitatePluginRuntimeHost
     ShitatePluginScanner
-    ShitateGainPlugin_VST3)
+    ShitateGainPlugin_VST3
+    ShitateCrashPlugin_VST3)
   shitate_apply_juce_definitions(ShitatePluginRuntimeHost)
   shitate_enable_warnings(ShitatePluginRuntimeHost)
   target_compile_options(ShitatePluginRuntimeHost PRIVATE
     $<$<COMPILE_LANGUAGE:CXX,OBJCXX>:-Wno-unnecessary-virtual-specifier>)
 
+  add_executable(ShitateRecoveryStateHarness
+    Tests/Integration/RecoveryStateHarness.swift
+    Sources/App/ApplicationState.swift
+    Sources/Services/Persistence/AtomicFileWriter.swift
+    Sources/Services/Persistence/PersistenceModels.swift
+    Sources/Services/Persistence/SecurePersistence.swift
+    Sources/Services/RunStateService.swift)
+  target_link_libraries(ShitateRecoveryStateHarness PRIVATE "-framework Foundation")
+  set_target_properties(ShitateRecoveryStateHarness PROPERTIES
+    XCODE_ATTRIBUTE_SWIFT_STRICT_CONCURRENCY "complete"
+    XCODE_ATTRIBUTE_SWIFT_VERSION "6.0")
+
+  add_executable(ShitateTerminationObserver
+    Tests/Integration/TerminationObserver.cpp)
+  shitate_enable_warnings(ShitateTerminationObserver)
+
   xctest_add_bundle(ShitateSwiftTests Shitate
     Sources/App/AppModel+Persistence.swift
     Sources/App/AppModel+Plugins.swift
+    Sources/App/AppModel+Recovery.swift
+    Sources/App/AppModel+Diagnostics.swift
     Sources/App/ApplicationState.swift
     Sources/App/AppModel.swift
     Sources/App/AudioDevice.swift
@@ -339,6 +420,8 @@ if(BUILD_TESTING)
     Sources/Services/GlobalHotKeyService.swift
     Sources/Services/LaunchAtLoginService.swift
     Sources/Services/MicrophonePermissionService.swift
+    Sources/Services/DiagnosticService.swift
+    Sources/Services/RunStateService.swift
     Sources/Services/Persistence/AtomicFileWriter.swift
     Sources/Services/Persistence/PersistenceModels.swift
     Sources/Services/Persistence/PluginCatalogService.swift
@@ -351,11 +434,14 @@ if(BUILD_TESTING)
     Tests/Swift/AtomicFileWriterTests.swift
     Tests/Swift/AudioEnvironmentTests.swift
     Tests/Swift/BridgeVersionTests.swift
+    Tests/Swift/DiagnosticServiceTests.swift
     Tests/Swift/MicrophonePermissionTests.swift
     Tests/Swift/PersistenceStoreTests.swift
     Tests/Swift/PluginBundleDiscoveryTests.swift
     Tests/Swift/PluginCatalogStoreTests.swift
     Tests/Swift/ProductModelTests.swift
+    Tests/Swift/RecoveryPolicyTests.swift
+    Tests/Swift/RunStateServiceTests.swift
     Tests/Swift/SessionStoreTests.swift
     Tests/Swift/SystemServiceTests.swift
     Tests/Swift/WorkspaceEventServiceTests.swift)
@@ -364,6 +450,7 @@ if(BUILD_TESTING)
     "-framework AppKit"
     "-framework AVFoundation"
     "-framework Carbon"
+    "-framework CryptoKit"
     "-framework ServiceManagement")
   target_link_options(ShitateSwiftTests PRIVATE
     "LINKER:-force_load,$<TARGET_FILE:ShitateBridge>"
@@ -424,9 +511,18 @@ if(BUILD_TESTING)
     LABELS "integration;plugin-runtime-integration"
     TIMEOUT 30)
 
+  add_test(NAME RecoveryCrashIntegrationTest
+    COMMAND "${CMAKE_SOURCE_DIR}/Tests/Integration/RecoveryCrashIntegrationTest.sh"
+      "$<TARGET_FILE:ShitateTerminationObserver>"
+      "$<TARGET_FILE:ShitateRecoveryStateHarness>"
+      "$<TARGET_FILE:ShitatePluginRuntimeHost>")
+  set_tests_properties(RecoveryCrashIntegrationTest PROPERTIES
+    LABELS "integration;recovery"
+    TIMEOUT 30)
+
   xctest_add_test(BridgeVersionTest ShitateSwiftTests)
   set_tests_properties(BridgeVersionTest PROPERTIES
-    LABELS "unit;swift;audio-unit;swift-state;persistence;ui-integration")
+    LABELS "unit;swift;audio-unit;swift-state;persistence;ui-integration;recovery;security")
 
   add_test(NAME AudioHardwareIntegrationTest COMMAND ShitateAudioHardwareTest)
   set_tests_properties(AudioHardwareIntegrationTest PROPERTIES
@@ -444,6 +540,18 @@ if(BUILD_TESTING)
   set_tests_properties(BundleLayoutTest PROPERTIES
     DEPENDS ScannerArgumentsTest
     LABELS "integration;bundle")
+
+  add_test(NAME SecurityPolicyTest
+    COMMAND "${CMAKE_SOURCE_DIR}/Tests/Integration/SecurityPolicyTest.sh"
+      "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(SecurityPolicyTest PROPERTIES
+    LABELS "integration;security;release-policy")
+
+  add_test(NAME WorkflowPolicyTest
+    COMMAND "${CMAKE_SOURCE_DIR}/Tests/Integration/WorkflowPolicyTest.sh"
+      "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(WorkflowPolicyTest PROPERTIES
+    LABELS "integration;security;release-policy")
 
   add_test(NAME InvalidVersionTest
     COMMAND "${CMAKE_COMMAND}"

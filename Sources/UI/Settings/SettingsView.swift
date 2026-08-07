@@ -223,11 +223,18 @@ private struct GeneralSettingsPane: View {
             }
 
             Section("System events") {
-                Toggle("Resume routing after wake", isOn: .constant(false))
-                    .disabled(true)
-                Text("Unavailable in v0.1. Shi-tate always remains stopped after wake.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Toggle(
+                    "Resume routing after wake",
+                    isOn: Binding(
+                        get: { model.settings.resumeAfterWake },
+                        set: { model.setResumeAfterWake($0) }
+                    )
+                )
+                Text(
+                    "Off by default. When enabled, Shi-tate waits one second and restarts only after the saved devices, format, and plug-ins all pass validation."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             Section("Keyboard") {

@@ -95,6 +95,64 @@ private aggregate, exact subdevices, BlackHole clock, input drift compensation,
 | Incomplete plug-in recovery choices | UNVERIFIED | Controls are present; no third-party bundle was invalidated manually |
 | Zoom or Google Meet microphone selection | UNVERIFIED | No communication app was exercised |
 
+## Phase 7 recovery and release-policy record
+
+- Recorded: 2026-08-07 16:20 (JST)
+- Source: Phase 7 worktree based on `15643b2d5c3c`
+- Host/toolchain: Apple Silicon, macOS 26.5.2 (25F84), Xcode 26.6
+- Full CTest: 28 registered, 27 passed, 0 failed, 1 hardware opt-in skip
+- Recovery label: 2/2 passed, including a disposable runtime CrashPlugin child
+  followed by a fresh-process safe-mode assertion before plug-in factory use
+- Security label: 3/3 passed, including entitlement/content/network negative
+  fixtures and GitHub workflow-policy negative fixtures
+- Release build: `BUILD_TESTING=OFF`, arm64, minimum macOS 14.0, ad-hoc
+  Hardened Runtime app/helper; explicit nested-code and entitlement checks passed
+- Network boundary: no WebKit/CFNetwork/Network/libcurl dependency and no
+  `NSURLSession`, `CFHTTP`, `NWConnection`, curl, or WKWebView symbol in the
+  release app/helper after dead stripping the unused JUCE URL backend
+- Local package: `Shi-tate_0.1.0_arm64.dmg` created as UDZO/HFS+ and its
+  adjacent SHA-256 verified; this is not Developer ID/notarization evidence
+- Source archive: `PENDING` until the reviewed Phase 7 files are committed and a
+  clean recursive archive can identify its exact commit
+- Remote CI/CodeQL: `UNVERIFIED`; workflow policy is tested locally, but no
+  GitHub-hosted run is claimed
+
+### Design §24.5 reliability matrix
+
+| Required case | Status | Evidence boundary |
+|---|---|---|
+| Two-hour zero-plug-in passthrough, xrun 0 | UNVERIFIED | Only 250 ms short hardware gates passed |
+| Two-hour three-plug-in chain, xrun 0 | UNVERIFIED | No three-plug-in hardware run |
+| Eight-hour soak, host growth under 10 MB | UNVERIFIED | Duration/performance run not performed |
+| Physical input and BlackHole removal | UNVERIFIED | Fail-closed reducer/policy tests pass; hot-unplug not performed |
+| Ten sleep/wake cycles | UNVERIFIED | Delay/coalescing/default-off policy tests pass; real cycles not performed |
+| Sample-rate and buffer changes | PARTIAL | 128/256/512 short gates pass; live rate/buffer mutation not performed |
+| 100 editor open/close cycles | UNVERIFIED | Native editor lifecycle unit tests pass; count gate not performed |
+| Runtime CrashPlugin → next-launch safe mode | AUTOMATED PASS | Disposable child crash and fresh-process run-state harness |
+| 1,000 global mute toggles | UNVERIFIED | Single live UI sequence and audio-unit ramp tests only |
+| Zoom and Google Meet dual mono | UNVERIFIED | Neither communication application was exercised |
+
+### Design §28 completion evidence
+
+| Area | Status | Evidence or blocker |
+|---|---|---|
+| arm64/macOS 14 binary contract | AUTOMATED PASS | Release Mach-O architecture and minimum-OS checks; macOS 14 runtime launch remains unverified |
+| Physical microphone/channel and BlackHole 48 kHz route | PARTIAL | AT2040USB short gate, exact BlackHole route, 128/256/512, xrun 0; long/communication-app gates remain |
+| Eight-slot VST3 chain/editor/bypass/reorder/state | AUTOMATED PASS | Deterministic fixtures and workflow tests; broad third-party compatibility remains unverified |
+| Global mute and menu-bar residency | PARTIAL | Live mute state/meter sequence and UI tests; long/repeated interaction gates remain |
+| Scanner isolation/reaping and non-finite safety | AUTOMATED PASS | Crash/hang scanner integration and per-slot/final safety tests |
+| Fail-closed device/sleep/wake recovery | AUTOMATED PASS | State/event policy and race tests; hot-unplug and ten real sleep cycles remain unverified |
+| Dirty shutdown safe mode and repeated-fingerprint block | AUTOMATED PASS | Run-state unit matrix and disposable runtime crash integration |
+| Diagnostics redaction/bounds/rotation | AUTOMATED PASS | Home/UID/control/oversize/forbidden-marker negative tests and 5 MiB × three-rotation policy |
+| No app networking/admin/shell/bundled driver or VST3 | AUTOMATED PASS | Source, Mach-O dependency/symbol, entitlement, and bundle policy tests |
+| Ad-hoc release layout and DMG/SHA-256 | LOCAL PASS | Explicitly not distribution-signing evidence |
+| Developer ID, notarization, staple, Gatekeeper | BLOCKED | No credential use or release authority was provided; no production release attempted |
+| Recursive source rebuild and provenance | PENDING | Run only after the final reviewed commit; release workflow is locally policy-tested |
+| Remote CI and CodeQL | UNVERIFIED | No push or remote workflow run was authorized |
+
+No tag, GitHub Release, upload, signing credential, or notarization service was
+used during this record.
+
 ## Reproduction command
 
 Run only on a Mac where microphone access has been explicitly granted. Prefer a

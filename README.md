@@ -52,7 +52,9 @@ SwiftUI owns the product UI and local state. A thin Objective-C++ bridge
 isolates the C++20/JUCE audio core. The main target is `Shitate`; the distributed
 application name is `Shi-tate.app`.
 
-See the [canonical detailed design](docs/design.md).
+See the [implemented architecture](docs/architecture.md),
+[threat model](docs/threat-model.md), and
+[canonical detailed design](docs/design.md).
 
 ## Requirements
 
@@ -108,6 +110,23 @@ utility running; use Quit to terminate it.
 See [manual audio QA](docs/manual-qa.md) for the exact verified and unverified
 hardware/product-flow evidence.
 
+## Verify a future signed release
+
+There is no signed release yet. When one is published, download its DMG and
+adjacent checksum from the same approved release, then verify before opening it:
+
+```bash
+shasum -a 256 -c Shi-tate_0.1.0_arm64.dmg.sha256
+spctl --assess --type open --context context:primary-signature --verbose=4 \
+  Shi-tate_0.1.0_arm64.dmg
+```
+
+After dragging the app to Applications, verify it again with
+`spctl --assess --type execute --verbose=4 /Applications/Shi-tate.app`. Do not
+bypass Gatekeeper if either assessment fails. The release also provides a
+recursive `shitate-0.1.0-source.tar.zst` archive and SHA-256; GitHub's automatic
+source archive is not the corresponding source because it omits JUCE contents.
+
 ## Privacy and security
 
 Shi-tate is designed without audio storage, telemetry, crash upload, analytics,
@@ -115,10 +134,17 @@ remote configuration, plug-in download, or app network access. It does not run
 a shell or require administrator privileges. Device failures never trigger an
 implicit fallback to another input or speaker.
 
+Local asynchronous logs are owner-only, bounded to 5 MiB with three rotated
+generations, and redact home paths and device UIDs. `Copy Diagnostics` is an
+explicit clipboard action; Shi-tate never sends or automatically persists that
+report.
+
 VST3 plug-ins are untrusted native code. Scanning is isolated, but v0.1 runtime
 plug-ins execute inside the main app and can crash, hang, access files, or use
-the network with your permissions. Load only plug-ins you trust. See
-[SECURITY.md](SECURITY.md).
+the network with your permissions. App Sandbox is disabled and Library
+Validation is disabled for the app/scanner to support user VST3 bundles;
+Hardened Runtime does not contain those plug-ins. Load only plug-ins you trust.
+See [SECURITY.md](SECURITY.md).
 
 ## Licensing and third parties
 

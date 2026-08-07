@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -19,6 +20,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <sys/stat.h>
 #include <vector>
 
@@ -28,6 +30,10 @@
 
 #ifndef SHITATE_GAIN_PLUGIN_PATH
 #error "SHITATE_GAIN_PLUGIN_PATH must be provided by CMake"
+#endif
+
+#ifndef SHITATE_CRASH_PLUGIN_PATH
+#error "SHITATE_CRASH_PLUGIN_PATH must be provided by CMake"
 #endif
 
 namespace {
@@ -54,10 +60,11 @@ class TemporaryRuntimeDirectory final {
 }
 
 [[nodiscard]] std::optional<shitate::plugins::CatalogEntry>
-scanGainPlugin(const std::shared_ptr<shitate::plugins::PluginSignatureVerifier>& verifier) {
+scanPlugin(const std::shared_ptr<shitate::plugins::PluginSignatureVerifier>& verifier,
+           const std::string& bundlePath, const std::string& fixtureName) {
     shitate::plugins::PluginScanCoordinator coordinator(verifier);
     static_cast<void>(coordinator.cleanupStaleTasks());
-    const auto outcome = coordinator.scan(SHITATE_SCANNER_PATH, SHITATE_GAIN_PLUGIN_PATH);
+    const auto outcome = coordinator.scan(SHITATE_SCANNER_PATH, bundlePath);
     if (outcome.kind != shitate::plugins::ScanOutcomeKind::success || !outcome.result.has_value()) {
         std::cerr << "runtime host scan failed: " << outcome.diagnosticCode << '\n';
         return std::nullopt;
@@ -76,11 +83,18 @@ scanGainPlugin(const std::shared_ptr<shitate::plugins::PluginSignatureVerifier>&
     }
     for (const auto& entry : catalog.entries()) {
         if (entry.compatibility == shitate::plugins::PluginCompatibility::compatible) {
-            return entry;
+            if (entry.name.find(fixtureName) != std::string::npos) {
+                return entry;
+            }
         }
     }
-    std::cerr << "runtime host found no compatible Gain fixture class\n";
+    std::cerr << "runtime host found no compatible " << fixtureName << " fixture class\n";
     return std::nullopt;
+}
+
+[[nodiscard]] std::optional<shitate::plugins::CatalogEntry>
+scanGainPlugin(const std::shared_ptr<shitate::plugins::PluginSignatureVerifier>& verifier) {
+    return scanPlugin(verifier, SHITATE_GAIN_PLUGIN_PATH, "Gain");
 }
 
 [[nodiscard]] shitate::plugins::SlotId slotID(std::uint8_t value) {
@@ -149,16 +163,37 @@ struct Runtime final {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     juce::ScopedJuceInitialiser_GUI guiInitialiser;
     TemporaryRuntimeDirectory directory;
     auto verifier = std::make_shared<shitate::plugins::PluginSignatureVerifier>();
+    auto journal = std::make_shared<shitate::plugins::FilePluginLoadJournal>(
+        (directory.path / "plugin-load-journal.json").string());
+
+    if (argc == 2 && std::string_view(argv[1]) == "--crash") {
+        const auto crashEntry = scanPlugin(verifier, SHITATE_CRASH_PLUGIN_PATH, "Crash");
+        if (!crashEntry.has_value()) {
+            return 1;
+        }
+        Runtime crashRuntime(verifier, journal);
+        auto created = crashRuntime.factory.create(*crashEntry, slotID(1));
+        if (!created.result.succeeded() || created.slot == nullptr ||
+            !crashRuntime.chain.addSlot(std::move(created.slot)).succeeded()) {
+            std::cerr << "runtime crash child could not load the fixture\n";
+            return 1;
+        }
+        if (::setenv("SHITATE_TEST_PLUGIN_BEHAVIOR", "Crash", 1) != 0) {
+            return 1;
+        }
+        static_cast<void>(process(crashRuntime));
+        std::cerr << "runtime CrashPlugin unexpectedly returned\n";
+        return 1;
+    }
+
     const auto entry = scanGainPlugin(verifier);
     if (!entry.has_value()) {
         return 1;
     }
-    auto journal = std::make_shared<shitate::plugins::FilePluginLoadJournal>(
-        (directory.path / "plugin-load-journal.json").string());
 
     std::array<std::vector<std::uint8_t>, 3> savedStates;
     std::optional<float> firstOutput;

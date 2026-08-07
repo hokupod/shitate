@@ -108,16 +108,33 @@ struct LoadingPluginDocument: Codable, Equatable, Sendable {
     var pluginName: String
 }
 
+struct RunHistoryRecord: Codable, Equatable, Sendable {
+    var runID: UUID
+    var startedAt: String
+    var observedAt: String
+    var durationSeconds: Double
+    var abnormalExit: Bool
+    var lastOperation: String
+    var loadingPlugin: LoadingPluginDocument?
+    var routingWasActive: Bool
+    var clockReversed: Bool
+}
+
 struct RunStateDocument: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
+    static let maximumHistoryRecords = 12
 
     var schemaVersion: Int
     var runID: UUID
     var cleanShutdown: Bool
     var startedAt: String
+    var updatedAt: String
+    var endedAt: String?
+    var processUptimeSeconds: Double
     var lastOperation: String
     var loadingPlugin: LoadingPluginDocument?
     var routingWasActive: Bool
+    var history: [RunHistoryRecord]
 }
 
 struct BlockedPluginsDocument: Codable, Equatable, Sendable {

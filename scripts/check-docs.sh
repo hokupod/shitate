@@ -17,6 +17,9 @@ required_files=(
   README.ja.md
   README.zh-CN.md
   docs/design.md
+  docs/architecture.md
+  docs/threat-model.md
+  docs/manual-qa.md
   docs/plugin-compatibility.md
   LICENSE
   LICENSES/AGPL-3.0-only.txt
@@ -45,6 +48,8 @@ for readme in "${readmes[@]}"; do
   grep -Fq 'BlackHole 2ch' "${path}" || fail "${readme}: BlackHole requirement missing"
   grep -Fq 'arm64' "${path}" || fail "${readme}: architecture missing"
   grep -Fq 'macOS 14' "${path}" || fail "${readme}: minimum OS missing"
+  grep -Fq 'docs/architecture.md' "${path}" || fail "${readme}: architecture link missing"
+  grep -Fq 'docs/threat-model.md' "${path}" || fail "${readme}: threat-model link missing"
   grep -Eiq 'pre-alpha|プレアルファ' "${path}" || fail "${readme}: pre-alpha status missing"
 done
 

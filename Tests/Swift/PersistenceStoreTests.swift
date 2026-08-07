@@ -22,7 +22,7 @@ final class PersistenceStoreTests: XCTestCase {
         XCTAssertEqual(try permissions(fixture.paths.settingsURL), 0o600)
     }
 
-    func testSettingsRejectFutureSchemaAndResumeAfterWake() throws {
+    func testSettingsRejectFutureSchemaAndPersistExplicitWakePreference() throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try SecureDirectory.prepare(fixture.paths.applicationSupportDirectory)
@@ -33,9 +33,10 @@ final class PersistenceStoreTests: XCTestCase {
             XCTAssertEqual(error as? PersistenceStoreError, .unsupportedSchema(99))
         }
 
-        var invalid = SettingsDocument.defaults
-        invalid.resumeAfterWake = true
-        XCTAssertThrowsError(try SettingsStore(paths: fixture.paths).save(invalid))
+        var optedIn = SettingsDocument.defaults
+        optedIn.resumeAfterWake = true
+        try SettingsStore(paths: fixture.paths).save(optedIn)
+        XCTAssertTrue(try SettingsStore(paths: fixture.paths).load().resumeAfterWake)
     }
 
     func testSettingsMigrationCreatesBackupBeforePublishingV1() throws {
@@ -91,13 +92,17 @@ final class PersistenceStoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let runStore = RunStateStore(paths: fixture.paths)
         let runState = RunStateDocument(
-            schemaVersion: 1,
+            schemaVersion: RunStateDocument.currentSchemaVersion,
             runID: UUID(),
             cleanShutdown: false,
             startedAt: "2026-08-07T00:00:00Z",
+            updatedAt: "2026-08-07T00:00:00Z",
+            endedAt: nil,
+            processUptimeSeconds: 0,
             lastOperation: "launch",
             loadingPlugin: nil,
-            routingWasActive: false
+            routingWasActive: false,
+            history: []
         )
         try runStore.save(runState)
         XCTAssertEqual(try runStore.load(), runState)

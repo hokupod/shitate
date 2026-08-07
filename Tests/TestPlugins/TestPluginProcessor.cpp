@@ -8,10 +8,12 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
+#include <unistd.h>
 
 #ifndef SHITATE_TEST_PLUGIN_KIND
 #error "SHITATE_TEST_PLUGIN_KIND must be provided by CMake"
@@ -35,6 +37,24 @@ constexpr auto kind = static_cast<TestPluginKind>(SHITATE_TEST_PLUGIN_KIND);
 [[maybe_unused, nodiscard]] bool dangerousBehaviorEnabled(std::string_view expected) {
     const auto* value = std::getenv("SHITATE_TEST_PLUGIN_BEHAVIOR");
     return value != nullptr && std::string_view(value) == expected;
+}
+
+[[maybe_unused]] void writeCrashSentinel() noexcept {
+    const auto* path = std::getenv("SHITATE_TEST_CRASH_SENTINEL");
+    if (path == nullptr || *path == '\0') {
+        return;
+    }
+    const auto descriptor =
+        ::open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (descriptor < 0) {
+        return;
+    }
+    constexpr std::string_view evidence{"CrashPlugin processBlock\n"};
+    const auto written = ::write(descriptor, evidence.data(), evidence.size());
+    if (written == static_cast<ssize_t>(evidence.size())) {
+        static_cast<void>(::fsync(descriptor));
+    }
+    static_cast<void>(::close(descriptor));
 }
 
 } // namespace
@@ -100,6 +120,11 @@ void ShitateTestPluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, 
         throw std::runtime_error("intentional scanner fixture exception");
     } else if constexpr (kind == crashing) {
         if (dangerousBehaviorEnabled("Crash")) {
+            writeCrashSentinel();
+            const auto* termination = std::getenv("SHITATE_TEST_CRASH_TERMINATION");
+            if (termination != nullptr && std::string_view(termination) == "Exit134") {
+                ::_exit(134);
+            }
             std::abort();
         }
     } else if constexpr (kind == hanging) {

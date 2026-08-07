@@ -15,7 +15,7 @@ struct DiagnosticsView: View {
             versionSection
             audioSection
             pluginSection
-            unavailableActions
+            diagnosticsActions
         }
     }
 
@@ -28,7 +28,8 @@ struct DiagnosticsView: View {
                 }
                 GridRow {
                     Text("Commit").foregroundStyle(.secondary)
-                    Text("Unavailable in this development build")
+                    Text(BuildMetadata.commit)
+                        .monospacedDigit()
                 }
                 GridRow {
                     Text("JUCE").foregroundStyle(.secondary)
@@ -67,8 +68,9 @@ struct DiagnosticsView: View {
                     .monospacedDigit()
                 }
                 GridRow {
-                    Text("Callback maximum").foregroundStyle(.secondary)
-                    Text("Unavailable until recovery diagnostics are implemented")
+                    Text("Host latency").foregroundStyle(.secondary)
+                    Text("\(model.diagnostics.aggregateLatencySamples) samples")
+                        .monospacedDigit()
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -95,20 +97,27 @@ struct DiagnosticsView: View {
         }
     }
 
-    private var unavailableActions: some View {
+    private var diagnosticsActions: some View {
         GroupBox("Recovery Tools") {
             VStack(alignment: .leading, spacing: 10) {
                 Text(
-                    "Log export and Safe Mode reset arrive with the recovery phase. These controls are shown as unavailable so this build does not imply evidence it cannot produce."
+                    "Logs and copied diagnostics are local, bounded, and redacted. Shi-tate never sends them automatically."
                 )
                 .foregroundStyle(.secondary)
                 HStack {
-                    Button("Open Logs Folder") {}
-                    Button("Copy Redacted Diagnostics") {}
-                    Button("Reset Safe Mode") {}
+                    Button("Open Logs Folder") {
+                        model.openLogsFolder()
+                    }
+                    Button("Copy Redacted Diagnostics") {
+                        model.copyDiagnosticsToPasteboard()
+                    }
+                    if model.safeModeReason != nil {
+                        Button("Return to Safe Mode") {
+                            model.selectedSection = .dashboard
+                        }
+                    }
                     Spacer()
                 }
-                .disabled(true)
             }
             .padding(.vertical, 4)
         }

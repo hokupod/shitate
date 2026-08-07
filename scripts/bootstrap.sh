@@ -54,8 +54,40 @@ if ! perl -Mversion -e 'exit(version->parse($ARGV[0]) < version->parse($ARGV[1])
   exit 1
 fi
 
-git -C "$repository_root" submodule update --init --recursive external/JUCE
-actual_juce_sha=$(git -C "$repository_root/external/JUCE" rev-parse HEAD)
+checkout_root=$(git -C "$repository_root" rev-parse --show-toplevel 2>/dev/null || true)
+juce_checkout_root=$(git -C "$repository_root/external/JUCE" rev-parse --show-toplevel 2>/dev/null || true)
+if [[ "$checkout_root" == "$repository_root" &&
+  "$juce_checkout_root" == "$repository_root/external/JUCE" ]]; then
+  git -C "$repository_root" submodule update --init --recursive external/JUCE
+  actual_juce_sha=$(git -C "$repository_root/external/JUCE" rev-parse HEAD)
+else
+  source_metadata="$repository_root/SOURCE-METADATA.json"
+  juce_manifest="$repository_root/JUCE-SOURCE.sha256"
+  if [[ ! -f "$source_metadata" || ! -f "$juce_manifest" ]]; then
+    printf 'Git checkout or verified corresponding-source metadata is required.\n' >&2
+    exit 1
+  fi
+  if ! jq -e '
+    .schemaVersion == 1 and
+    (.version | type == "string") and
+    (.commit | test("^[0-9a-f]{40}$")) and
+    (.juceCommit | test("^[0-9a-f]{40}$"))
+  ' "$source_metadata" >/dev/null; then
+    printf 'Corresponding-source metadata is invalid.\n' >&2
+    exit 1
+  fi
+  actual_juce_sha=$(jq -r '.juceCommit' "$source_metadata")
+  manifest_count=$(wc -l <"$juce_manifest" | tr -d ' ')
+  source_count=$(find "$repository_root/external/JUCE" -type f | wc -l | tr -d ' ')
+  if [[ "$manifest_count" != "$source_count" ]]; then
+    printf 'Corresponding-source JUCE file count does not match its manifest.\n' >&2
+    exit 1
+  fi
+  (
+    cd "$repository_root"
+    shasum -a 256 -c JUCE-SOURCE.sha256 >/dev/null
+  )
+fi
 if [[ "$actual_juce_sha" != "$expected_juce_sha" ]]; then
   printf 'JUCE must be pinned to %s; found %s.\n' \
     "$expected_juce_sha" "$actual_juce_sha" >&2

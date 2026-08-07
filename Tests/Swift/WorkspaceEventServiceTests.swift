@@ -55,6 +55,24 @@ final class WorkspaceEventServiceTests: XCTestCase {
         service.stop()
     }
 
+    func testRepeatedWakeCoalescesToOneRecovery() async {
+        let service = WorkspaceEventService(
+            notificationCenter: NotificationCenter(),
+            wakeDelay: .milliseconds(10)
+        )
+        var wakeCount = 0
+        service.onDidWake = {
+            wakeCount += 1
+        }
+
+        service.handleDidWake()
+        service.handleDidWake()
+        service.handleDidWake()
+        try? await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(wakeCount, 1)
+        service.stop()
+    }
+
     func testProductionWakeDelayIsOneSecond() {
         XCTAssertEqual(WorkspaceEventService.defaultWakeDelay, .seconds(1))
     }

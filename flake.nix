@@ -23,6 +23,7 @@
           pkg-config
           ripgrep
           shellcheck
+          yq-go
           zstd
         ];
 

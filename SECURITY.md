@@ -42,6 +42,20 @@ The host itself is designed to:
 BlackHole is an external project and is not bundled. Its installation and
 security lifecycle are outside the Shi-tate trust boundary.
 
+Release publication additionally requires an active tag ruleset that prevents
+updates and deletion for `v*.*.*`, the protected `release` environment,
+`SHITATE_IMMUTABLE_RELEASE_TAGS=YES`, and a configured
+`SHITATE_RELEASE_TAGGER_EMAIL`. The workflow accepts only a GitHub-verified
+annotated tag whose `valid` signature covers that tagger identity, records its
+tag-object SHA, and revalidates the same live object immediately before creating
+the draft release.
+
+App Sandbox is disabled and Library Validation is disabled only for the app and
+scanner because user VST3 bundles are loaded as native code. Hardened Runtime
+and release entitlement checks remain enabled, but these controls do not
+contain an in-process plug-in. See the detailed [v0.1 threat model](docs/threat-model.md)
+and [architecture](docs/architecture.md).
+
 ## Disclosure expectations
 
 Please avoid public disclosure until the maintainer can assess impact and a

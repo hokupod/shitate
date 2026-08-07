@@ -3,8 +3,15 @@
 
 import Foundation
 
-enum SafeModeReason: Equatable {
+enum SafeModeReason: Equatable, Sendable {
     case previousRunUnclean
+    case pluginLoadInterrupted(String)
+    case rapidCrashLoop
+    case repeatedPluginCrash(String)
+    case clockReversal
+    case runStateInvalid
+    case runStateWriteFailed
+    case stateMigrationFailed
 }
 
 enum BlockingIssue: Equatable {

@@ -73,17 +73,24 @@ struct MainView: View {
 
     @ViewBuilder
     private var selectedView: some View {
-        switch model.selectedSection {
-        case .dashboard:
-            DashboardView()
-        case .chain:
-            ChainView()
-        case .plugins:
-            PluginsView()
-        case .diagnostics:
-            DiagnosticsView()
-        case .about:
-            AboutView()
+        if model.safeModeReason != nil,
+            model.selectedSection != .diagnostics,
+            model.selectedSection != .about
+        {
+            SafeModeView()
+        } else {
+            switch model.selectedSection {
+            case .dashboard:
+                DashboardView()
+            case .chain:
+                ChainView()
+            case .plugins:
+                PluginsView()
+            case .diagnostics:
+                DiagnosticsView()
+            case .about:
+                AboutView()
+            }
         }
     }
 

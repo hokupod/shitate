@@ -48,7 +48,8 @@ telemetry、updater或runtime plugin isolation。
 SwiftUI负责产品UI和本地状态。轻量Objective-C++ bridge隔离C++20/JUCE音频
 核心。主target名为`Shitate`，发布的应用名为`Shi-tate.app`。
 
-请参阅[规范详细设计](docs/design.md)。
+请参阅[实现架构](docs/architecture.md)、[威胁模型](docs/threat-model.md)和
+[规范详细设计](docs/design.md)。
 
 ## 环境要求
 
@@ -100,15 +101,37 @@ routing。`Control-Shift-M`无需Accessibility权限即可切换master mute。�
 请参阅[Manual audio QA](docs/manual-qa.md)，了解每项hardware与产品流程中已验证
 和未验证的证据。
 
+## 验证未来的签名release
+
+目前尚无签名release。发布后，请从同一个获准release下载DMG及其checksum，
+并在打开前执行验证：
+
+```bash
+shasum -a 256 -c Shi-tate_0.1.0_arm64.dmg.sha256
+spctl --assess --type open --context context:primary-signature --verbose=4 \
+  Shi-tate_0.1.0_arm64.dmg
+```
+
+把应用拖入Applications后，再执行
+`spctl --assess --type execute --verbose=4 /Applications/Shi-tate.app`。
+如果任一检查失败，请勿绕过Gatekeeper。release还会提供recursive
+`shitate-0.1.0-source.tar.zst`及SHA-256。GitHub自动生成的source archive
+不包含JUCE内容，因此不是对应source。
+
 ## 隐私与安全
 
 Shi-tate不实现音频保存、telemetry、crash upload、analytics、remote
 configuration、plugin download或应用网络访问，也不运行shell或要求管理员权限。
 设备故障时绝不隐式切换到其他输入或扬声器。
 
+本地异步log仅限所有者访问，单文件上限5 MiB并保留三个轮换世代，同时会
+redact home path与device UID。`Copy Diagnostics`只在用户明确操作时写入
+clipboard；Shi-tate不会发送或自动保存该report。
+
 VST3是不受信任的native code。扫描过程会隔离，但v0.1的runtime plugin在主
 应用内执行，可能以用户权限造成crash、hang、文件访问或网络访问。只加载你信任
-的插件。另请参阅[SECURITY.md](SECURITY.md)。
+的插件。为支持用户VST3，App Sandbox已禁用，app/scanner也禁用了Library
+Validation；Hardened Runtime并不能隔离这些插件。另请参阅[SECURITY.md](SECURITY.md)。
 
 ## 许可证与第三方组件
 

@@ -25,6 +25,8 @@
   <string>14.0</string>
   <key>LSMultipleInstancesProhibited</key>
   <true/>
+  <key>ShitateCommit</key>
+  <string>@SHITATE_GIT_COMMIT@</string>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSMicrophoneUsageDescription</key>

@@ -1,0 +1,239 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Hokuto Takemiya
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: SemVer to release from the selected ref
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+jobs:
+  gate:
+    runs-on: macos-26
+    outputs:
+      commit: ${{ steps.gate.outputs.commit }}
+      tag: ${{ steps.gate.outputs.tag }}
+      tag_object: ${{ steps.gate.outputs.tag_object }}
+      version: ${{ steps.gate.outputs.version }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Validate protected release trigger
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANUAL_VERSION: ${{ inputs.version }}
+          SHITATE_IMMUTABLE_RELEASE_TAGS: ${{ vars.SHITATE_IMMUTABLE_RELEASE_TAGS }}
+          SHITATE_RELEASE_TAGGER_EMAIL: ${{ vars.SHITATE_RELEASE_TAGGER_EMAIL }}
+        run: |
+          set -euo pipefail
+          [[ "$SHITATE_IMMUTABLE_RELEASE_TAGS" == YES ]]
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            tag=${GITHUB_REF_NAME}
+            [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            version=${tag#v}
+          elif [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            version=$MANUAL_VERSION
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            tag="v$version"
+          else
+            printf 'unsupported release event: %s\n' "$GITHUB_EVENT_NAME" >&2
+            exit 1
+          fi
+          tag_ref="$RUNNER_TEMP/shitate-release-tag-ref.json"
+          tag_object="$RUNNER_TEMP/shitate-release-tag-object.json"
+          trap 'rm -f "$tag_ref" "$tag_object"' EXIT
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >"$tag_ref"
+          tag_sha=$(jq -r '.object.sha' "$tag_ref")
+          [[ "$tag_sha" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_sha" >"$tag_object"
+          ./scripts/validate-release-tag.sh \
+            "$tag" "$GITHUB_SHA" "$SHITATE_RELEASE_TAGGER_EMAIL" \
+            "$tag_ref" "$tag_object"
+          [[ "$version" == "$(sed 's/-dev$//' VERSION)" ]]
+          if gh release view "$tag" >/dev/null 2>&1; then
+            printf 'release already exists and will not be overwritten: %s\n' "$tag" >&2
+            exit 1
+          fi
+          printf 'commit=%s\ntag=%s\ntag_object=%s\nversion=%s\n' \
+            "$GITHUB_SHA" "$tag" "$tag_sha" "$version" >>"$GITHUB_OUTPUT"
+
+  test:
+    needs: gate
+    runs-on: macos-26
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@b4b293eae0b79aac8a161bb32925a5508c9cca93 # v31
+
+      - name: Build and test before release authority
+        run: |
+          nix develop -c ./scripts/bootstrap.sh
+          nix develop -c ./scripts/check-format.sh
+          nix develop -c ./scripts/configure.sh ci
+          nix develop -c ./scripts/build.sh ci
+          nix develop -c ./scripts/test.sh ci
+
+  release:
+    needs:
+      - gate
+      - test
+    environment: release
+    runs-on: macos-26
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@b4b293eae0b79aac8a161bb32925a5508c9cca93 # v31
+
+      - name: Build release and verify corresponding source
+        env:
+          SHITATE_ARTIFACT_DIR: ${{ runner.temp }}/shitate-artifacts
+          VERSION: ${{ needs.gate.outputs.version }}
+        run: |
+          nix develop -c ./scripts/bootstrap.sh
+          nix develop -c ./scripts/configure.sh release
+          nix develop -c ./scripts/build.sh release
+          nix develop -c ./scripts/make-source-archive.sh "$VERSION"
+          nix develop -c ./scripts/verify-source-archive.sh \
+            "$SHITATE_ARTIFACT_DIR/shitate-$VERSION-source.tar.zst"
+
+      - name: Sign, notarize, staple, and package
+        env:
+          SHITATE_ALLOW_NOTARIZATION: YES
+          SHITATE_ALLOW_SIGNING: YES
+          SHITATE_ARTIFACT_DIR: ${{ runner.temp }}/shitate-artifacts
+          SHITATE_CERTIFICATE_P12_BASE64: ${{ secrets.SHITATE_CERTIFICATE_P12_BASE64 }}
+          SHITATE_CERTIFICATE_PASSWORD: ${{ secrets.SHITATE_CERTIFICATE_PASSWORD }}
+          SHITATE_KEYCHAIN_PASSWORD: ${{ secrets.SHITATE_KEYCHAIN_PASSWORD }}
+          SHITATE_NOTARY_ISSUER_ID: ${{ secrets.SHITATE_NOTARY_ISSUER_ID }}
+          SHITATE_NOTARY_KEY_BASE64: ${{ secrets.SHITATE_NOTARY_KEY_BASE64 }}
+          SHITATE_NOTARY_KEY_ID: ${{ secrets.SHITATE_NOTARY_KEY_ID }}
+          SHITATE_RELEASE_MODE: developer-id
+          SHITATE_SIGNING_IDENTITY: ${{ vars.SHITATE_SIGNING_IDENTITY }}
+          VERSION: ${{ needs.gate.outputs.version }}
+        run: |
+          set -euo pipefail
+          umask 077
+          keychain="$RUNNER_TEMP/shitate-signing.keychain-db"
+          certificate="$RUNNER_TEMP/shitate-signing.p12"
+          notary_key="$RUNNER_TEMP/AuthKey_$SHITATE_NOTARY_KEY_ID.p8"
+          cleanup() {
+            security delete-keychain "$keychain" >/dev/null 2>&1 || true
+            rm -f "$certificate" "$notary_key"
+          }
+          trap cleanup EXIT
+          printf '%s' "$SHITATE_CERTIFICATE_P12_BASE64" | base64 --decode >"$certificate"
+          printf '%s' "$SHITATE_NOTARY_KEY_BASE64" | base64 --decode >"$notary_key"
+          security create-keychain -p "$SHITATE_KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$SHITATE_KEYCHAIN_PASSWORD" "$keychain"
+          security default-keychain -s "$keychain"
+          security import "$certificate" -k "$keychain" \
+            -P "$SHITATE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$SHITATE_KEYCHAIN_PASSWORD" "$keychain" >/dev/null
+
+          app="$GITHUB_WORKSPACE/build/release/Release/Shi-tate.app"
+          dmg="$SHITATE_ARTIFACT_DIR/Shi-tate_${VERSION}_arm64.dmg"
+          export SHITATE_NOTARY_KEY_PATH="$notary_key"
+          nix develop -c ./scripts/sign-release.sh "$app"
+          nix develop -c ./scripts/verify-release.sh "$app"
+          nix develop -c ./scripts/notarize.sh "$app"
+          SHITATE_DEFER_HASH=YES nix develop -c ./scripts/package.sh release
+          nix develop -c ./scripts/notarize.sh "$dmg"
+          nix develop -c ./scripts/hash-artifact.sh "$dmg"
+          nix develop -c ./scripts/verify-release.sh "$app"
+          spctl --assess --type execute --verbose=4 "$app"
+          spctl --assess --type open --context context:primary-signature \
+            --verbose=4 "$dmg"
+
+      - name: Create local provenance statement
+        env:
+          SHITATE_ARTIFACT_DIR: ${{ runner.temp }}/shitate-artifacts
+          VERSION: ${{ needs.gate.outputs.version }}
+        run: |
+          nix develop -c ./scripts/make-provenance.sh \
+            "$SHITATE_ARTIFACT_DIR/provenance.json" \
+            "$SHITATE_ARTIFACT_DIR/Shi-tate_${VERSION}_arm64.dmg" \
+            "$SHITATE_ARTIFACT_DIR/shitate-$VERSION-source.tar.zst" \
+            THIRD_PARTY_NOTICES.md
+
+      - name: Attest release subjects
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/shitate-artifacts/Shi-tate_${{ needs.gate.outputs.version }}_arm64.dmg
+            ${{ runner.temp }}/shitate-artifacts/shitate-${{ needs.gate.outputs.version }}-source.tar.zst
+
+      - name: Create draft release exactly once
+        env:
+          EXPECTED_COMMIT: ${{ needs.gate.outputs.commit }}
+          EXPECTED_TAG_OBJECT: ${{ needs.gate.outputs.tag_object }}
+          GH_TOKEN: ${{ github.token }}
+          SHITATE_ARTIFACT_DIR: ${{ runner.temp }}/shitate-artifacts
+          SHITATE_IMMUTABLE_RELEASE_TAGS: ${{ vars.SHITATE_IMMUTABLE_RELEASE_TAGS }}
+          SHITATE_RELEASE_TAGGER_EMAIL: ${{ vars.SHITATE_RELEASE_TAGGER_EMAIL }}
+          TAG: ${{ needs.gate.outputs.tag }}
+          VERSION: ${{ needs.gate.outputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$SHITATE_IMMUTABLE_RELEASE_TAGS" == YES ]]
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            printf 'release already exists and will not be overwritten: %s\n' "$TAG" >&2
+            exit 1
+          fi
+          [[ $(git rev-parse HEAD) == "$EXPECTED_COMMIT" ]]
+          tag_ref="$RUNNER_TEMP/shitate-release-final-tag-ref.json"
+          tag_object="$RUNNER_TEMP/shitate-release-final-tag-object.json"
+          trap 'rm -f "$tag_ref" "$tag_object"' EXIT
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >"$tag_ref"
+          live_tag_sha=$(jq -r '.object.sha' "$tag_ref")
+          [[ "$live_tag_sha" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$live_tag_sha" >"$tag_object"
+          ./scripts/validate-release-tag.sh \
+            "$TAG" "$EXPECTED_COMMIT" "$SHITATE_RELEASE_TAGGER_EMAIL" \
+            "$tag_ref" "$tag_object" "$EXPECTED_TAG_OBJECT"
+          arguments=(release create "$TAG" --draft --verify-tag \
+            --title "Shi-tate $VERSION" \
+            --notes "Draft release generated from verified v0.1 release gates.")
+          gh "${arguments[@]}" \
+            "$SHITATE_ARTIFACT_DIR/Shi-tate_${VERSION}_arm64.dmg" \
+            "$SHITATE_ARTIFACT_DIR/Shi-tate_${VERSION}_arm64.dmg.sha256" \
+            "$SHITATE_ARTIFACT_DIR/shitate-$VERSION-source.tar.zst" \
+            "$SHITATE_ARTIFACT_DIR/shitate-$VERSION-source.tar.zst.sha256" \
+            "$SHITATE_ARTIFACT_DIR/provenance.json" \
+            THIRD_PARTY_NOTICES.md

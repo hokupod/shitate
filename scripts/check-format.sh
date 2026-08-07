@@ -17,6 +17,7 @@ esac
 
 "$repository_root/scripts/check-docs.sh"
 "$repository_root/scripts/check-ci-policy.sh"
+"$repository_root/scripts/check-security-policy.sh"
 
 if [[ "$mode" == local ]]; then
   shell_scripts=()

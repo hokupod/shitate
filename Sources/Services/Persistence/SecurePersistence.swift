@@ -301,7 +301,6 @@ struct SettingsStore {
         }
         try PersistenceIdentifier.validateSessionID(document.lastSessionID)
         guard
-            document.resumeAfterWake == false,
             document.audio.inputChannelIndex >= 0,
             document.audio.manualOutputChannelStart >= 0,
             abs(document.audio.sampleRate - 48_000) < 0.5,
@@ -341,6 +340,15 @@ struct RunStateStore {
     static let maximumFileBytes = 1024 * 1024
 
     let paths: ApplicationPaths
+    var writer: (Data, URL) throws -> Void
+
+    init(
+        paths: ApplicationPaths,
+        writer: @escaping (Data, URL) throws -> Void = AtomicFileWriter.write
+    ) {
+        self.paths = paths
+        self.writer = writer
+    }
 
     func load() throws -> RunStateDocument? {
         guard
@@ -358,9 +366,15 @@ struct RunStateStore {
         let document = try PersistenceCoding.decode(RunStateDocument.self, from: data)
         guard
             ISO8601DateFormatter().date(from: document.startedAt) != nil,
+            ISO8601DateFormatter().date(from: document.updatedAt) != nil,
+            document.endedAt.map { ISO8601DateFormatter().date(from: $0) != nil } ?? true,
+            document.processUptimeSeconds >= 0,
+            document.processUptimeSeconds.isFinite,
             document.lastOperation.utf8.count <= 128,
             document.loadingPlugin?.pluginFingerprint.utf8.count ?? 0 <= 256,
-            document.loadingPlugin?.pluginName.utf8.count ?? 0 <= 1_024
+            document.loadingPlugin?.pluginName.utf8.count ?? 0 <= 1_024,
+            document.history.count <= RunStateDocument.maximumHistoryRecords,
+            document.history.allSatisfy(validateHistoryRecord)
         else {
             throw PersistenceStoreError.invalidDocument("invalid run state")
         }
@@ -376,7 +390,17 @@ struct RunStateStore {
         guard data.count <= Self.maximumFileBytes else {
             throw PersistenceStoreError.fileTooLarge
         }
-        try AtomicFileWriter.write(data, to: paths.runStateURL)
+        try writer(data, paths.runStateURL)
+    }
+
+    private func validateHistoryRecord(_ record: RunHistoryRecord) -> Bool {
+        ISO8601DateFormatter().date(from: record.startedAt) != nil
+            && ISO8601DateFormatter().date(from: record.observedAt) != nil
+            && record.durationSeconds >= 0
+            && record.durationSeconds.isFinite
+            && record.lastOperation.utf8.count <= 128
+            && (record.loadingPlugin?.pluginFingerprint.utf8.count ?? 0) <= 256
+            && (record.loadingPlugin?.pluginName.utf8.count ?? 0) <= 1_024
     }
 }
 
@@ -404,6 +428,47 @@ struct AuxiliaryPersistenceStore {
             throw PersistenceStoreError.invalidDocument("invalid blocked plug-ins")
         }
         try save(document, to: paths.blockedPluginsURL)
+    }
+
+    @discardableResult
+    func repairBlockedPlugins() throws -> URL? {
+        try SecureDirectory.prepare(paths.applicationSupportDirectory)
+        let source = paths.blockedPluginsURL
+        var status = stat()
+        let result = source.path.withCString { Darwin.lstat($0, &status) }
+        if result != 0 {
+            guard errno == ENOENT else {
+                throw PersistenceStoreError.unsafeFile
+            }
+            try saveBlockedPlugins(.empty)
+            return nil
+        }
+        guard
+            (status.st_mode & S_IFMT) == S_IFREG,
+            status.st_uid == getuid(),
+            status.st_nlink == 1
+        else {
+            throw PersistenceStoreError.unsafeFile
+        }
+
+        let quarantine = source.appendingPathExtension(
+            "quarantine-\(UUID().uuidString.lowercased())"
+        )
+        guard Darwin.rename(source.path, quarantine.path) == 0 else {
+            throw PersistenceStoreError.unsafeFile
+        }
+        guard Darwin.chmod(quarantine.path, mode_t(0o600)) == 0 else {
+            _ = Darwin.rename(quarantine.path, source.path)
+            throw PersistenceStoreError.unsafeFile
+        }
+        do {
+            try saveBlockedPlugins(.empty)
+        } catch {
+            _ = Darwin.unlink(source.path)
+            _ = Darwin.rename(quarantine.path, source.path)
+            throw error
+        }
+        return quarantine
     }
 
     func loadScanFolders() throws -> ScanFoldersDocument {

@@ -29,7 +29,10 @@
     {
       "name": "release",
       "inherits": "base",
-      "binaryDir": "${sourceDir}/build/release"
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "BUILD_TESTING": "OFF"
+      }
     }
   ],
   "buildPresets": [

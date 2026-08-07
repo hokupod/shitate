@@ -17,7 +17,6 @@ extension AppModel {
     func loadUserState() {
         do {
             settings = try settingsStore.load()
-            settings.resumeAfterWake = false
             applyPersistedAudioSettings()
             additionalPluginFolders = try auxiliaryStore.loadScanFolders().folders
             persistenceBlocksRouting = false
@@ -40,7 +39,6 @@ extension AppModel {
     }
 
     func persistSettings() {
-        settings.resumeAfterWake = false
         do {
             try settingsStore.save(settings)
         } catch {

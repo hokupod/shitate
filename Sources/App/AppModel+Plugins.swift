@@ -87,6 +87,11 @@ extension AppModel {
             lastError = "This plug-in is not compatible with the v0.1 stereo chain."
             return
         }
+        guard !blockedPluginFingerprints.contains(entry.fingerprint) else {
+            lastError =
+                "This exact plug-in fingerprint is blocked after repeated load crashes."
+            return
+        }
         if entry.signatureKind == .adHoc,
             !approvedAdHocFingerprints.contains(entry.fingerprint)
         {
@@ -179,6 +184,29 @@ extension AppModel {
             try bridge.openEditorForPluginSlot(with: slotID)
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    func restoreSavedSessionFromSafeMode() {
+        guard let persisted = loadedSession, let originalReason = safeModeReason else {
+            return
+        }
+        guard recordRunOperation("safeModeRestore", routingWasActive: false) else {
+            return
+        }
+        apply(.recoveryStarted)
+        restoreStrictSession(persisted) { [weak self] success in
+            guard let self else {
+                return
+            }
+            if success {
+                apply(.recoveryCompleted)
+                refreshEnvironment()
+                return
+            }
+            clearRuntimeSlots { [weak self] _ in
+                self?.enterSafeMode(originalReason)
+            }
         }
     }
 
@@ -366,17 +394,41 @@ extension AppModel {
         switch operation {
         case .addPlugin(let fingerprint):
             do {
+                guard
+                    let entry = pluginCatalog.document.entries.first(where: {
+                        $0.fingerprint == fingerprint
+                    })
+                else {
+                    throw PluginSessionError.catalogEntryMissing(fingerprint)
+                }
                 let descriptor = try pluginCatalog.runtimeDescriptor(
                     fingerprint: fingerprint,
                     approvedAdHocFingerprints: approvedAdHocFingerprints
                 )
+                let slotID = UUID()
+                try beginTrackedPluginLoad(
+                    slotID: slotID,
+                    fingerprint: fingerprint,
+                    name: entry.name
+                )
                 bridge.add(
                     descriptor,
-                    slotID: UUID(),
+                    slotID: slotID,
                     state: nil
                 ) { [weak self] error in
                     Task { @MainActor [weak self] in
-                        self?.completeMutation(error: error)
+                        guard let self else {
+                            return
+                        }
+                        guard finishTrackedPluginLoad() else {
+                            completeMutation(
+                                error: RunStateServiceError.persistence(
+                                    "plug-in load completion could not be recorded"
+                                )
+                            )
+                            return
+                        }
+                        completeMutation(error: error)
                     }
                 }
             } catch {
@@ -588,6 +640,11 @@ extension AppModel {
                 fingerprint: slot.pluginFingerprint,
                 approvedAdHocFingerprints: approvedAdHocFingerprints
             )
+            try beginTrackedPluginLoad(
+                slotID: slot.slotID,
+                fingerprint: slot.pluginFingerprint,
+                name: slot.name
+            )
             bridge.add(
                 descriptor,
                 slotID: slot.slotID,
@@ -595,6 +652,10 @@ extension AppModel {
             ) { [weak self] error in
                 Task { @MainActor [weak self] in
                     guard let self else {
+                        return
+                    }
+                    guard finishTrackedPluginLoad() else {
+                        completion(false)
                         return
                     }
                     if let error {
@@ -666,9 +727,24 @@ extension AppModel {
                 fingerprint: slot.pluginFingerprint,
                 approvedAdHocFingerprints: approvedAdHocFingerprints
             )
+            try beginTrackedPluginLoad(
+                slotID: slot.slotID,
+                fingerprint: slot.pluginFingerprint,
+                name: slot.name
+            )
             bridge.add(descriptor, slotID: slot.slotID, state: state) { [weak self] error in
                 Task { @MainActor [weak self] in
                     guard let self else {
+                        return
+                    }
+                    guard finishTrackedPluginLoad() else {
+                        completion(
+                            restoredSlotIDs,
+                            failures,
+                            RunStateServiceError.persistence(
+                                "plug-in load completion could not be recorded"
+                            )
+                        )
                         return
                     }
                     if let error {
