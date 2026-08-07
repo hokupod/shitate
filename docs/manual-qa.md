@@ -57,6 +57,44 @@ This interaction did not monitor audio acoustically, so it does not verify that
 the fades were click-free. A stopped-meter residue found during the interaction
 was fixed in Core and covered by `AudioEngineTest` before this record was closed.
 
+## Phase 6 onboarding record
+
+- Recorded: 2026-08-07 14:18 (JST)
+- Build: local `0.1.0-dev` Debug app after the Phase 6 SwiftUI composition
+- Tool: macOS Computer Use accessibility tree plus visual screenshots
+- BlackHole: detected as BlackHole 2ch; no installer or device UID was accessed
+- Permission: the user approved the Shi-tate microphone prompt; onboarding then
+  exposed `Microphone access is allowed`; approval was reconfirmed at
+  2026-08-07 14:36 (JST)
+- Input: AT2040USB, selected channel 1
+- Validation: 48,000 Hz / 256 frames reached `Ready and stopped`
+- Plug-ins: isolated scan reported one compatible local entry; the onboarding
+  chain intentionally remained empty
+- Zero-plug-in path: Welcome → BlackHole → permission → audio selection → audio
+  validation → scan → empty chain → call-app guide completed
+- Persistence: the default zero-plug-in session and settings were published as
+  owner-only (`0600`) files; no audio or raw device UID was recorded here
+- Product-flow boundary: Zoom/Meet selection and acoustic monitoring remain
+  `UNVERIFIED`
+
+The same checkout then passed the opt-in AT2040USB → BlackHole 2ch hardware gate:
+private aggregate, exact subdevices, BlackHole clock, input drift compensation,
+48,000 Hz / 256 frames, 404 input samples, 356 output samples, and xrun 0.
+
+| Phase 6 product path | Status | Evidence boundary |
+|---|---|---|
+| First launch and onboarding | VERIFIED | Computer Use accessibility tree and screenshots |
+| BlackHole missing branch | AUTOMATED | Model branch test only; installed driver prevented a manual missing-device run |
+| Permission request and grant | VERIFIED | User-approved macOS prompt and allowed-state UI |
+| Physical input selection and 48 kHz validation | VERIFIED | AT2040USB, channel 1, 256 frames |
+| Zero-plug-in scan, save, and completion | VERIFIED | One compatible catalog entry; empty session saved with mode `0600` |
+| Add, edit, bypass, reorder, remove third-party VST3 | UNVERIFIED | No third-party plug-in was loaded during this privacy-safe run |
+| Menu-bar mute | VERIFIED | Earlier live-meter sequence in this document; no acoustic monitoring |
+| Main-window hide and reopen | UNVERIFIED | Requires a stable post-build accessibility attachment |
+| Quit and fresh-process session restore | UNVERIFIED | Persistence round-trip is automated; final screen was not re-inspected |
+| Incomplete plug-in recovery choices | UNVERIFIED | Controls are present; no third-party bundle was invalidated manually |
+| Zoom or Google Meet microphone selection | UNVERIFIED | No communication app was exercised |
+
 ## Reproduction command
 
 Run only on a Mac where microphone access has been explicitly granted. Prefer a

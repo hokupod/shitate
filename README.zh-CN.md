@@ -81,6 +81,25 @@ nix develop
 自动测试覆盖build、audio core、scanner隔离和确定性的仓库内VST3 fixture。
 这些测试不能证明生产可用性，也不能证明与特定第三方插件兼容。
 
+## 试用开发版应用
+
+构建完成后，启动本地Debug应用：
+
+```bash
+open build/dev/Debug/Shi-tate.app
+```
+
+原生onboarding会检查BlackHole 2ch、请求麦克风权限、以48 kHz验证物理输入、
+扫描本地VST3、保存default session，并说明通话应用中的选择步骤。零插件chain
+也是有效的passthrough设置。Shi-tate绝不会替你安装BlackHole或插件。
+
+在通话应用中把麦克风选为BlackHole 2ch，然后从Dashboard或menu bar开始
+routing。`Control-Shift-M`无需Accessibility权限即可切换master mute。关闭主
+窗口后menu bar utility仍会运行；使用Quit可完全退出。
+
+请参阅[Manual audio QA](docs/manual-qa.md)，了解每项hardware与产品流程中已验证
+和未验证的证据。
+
 ## 隐私与安全
 
 Shi-tate不实现音频保存、telemetry、crash upload、analytics、remote

@@ -121,10 +121,16 @@ configure_file(resources/Scanner-Info.plist.in resources/Scanner-Info.plist @ONL
 
 add_executable(Shitate MACOSX_BUNDLE
   Sources/App/AppDelegate.swift
+  Sources/App/AppModel+Persistence.swift
+  Sources/App/AppModel+Plugins.swift
   Sources/App/ApplicationState.swift
   Sources/App/AppModel.swift
   Sources/App/AudioDevice.swift
+  Sources/App/ProductModels.swift
   Sources/App/ShitateApp.swift
+  Sources/App/SingleInstanceGuard.swift
+  Sources/Services/GlobalHotKeyService.swift
+  Sources/Services/LaunchAtLoginService.swift
   Sources/Services/MicrophonePermissionService.swift
   Sources/Services/Persistence/AtomicFileWriter.swift
   Sources/Services/Persistence/PersistenceModels.swift
@@ -133,11 +139,22 @@ add_executable(Shitate MACOSX_BUNDLE
   Sources/Services/Persistence/SecurePersistence.swift
   Sources/Services/Persistence/SessionStore.swift
   Sources/Services/WorkspaceEventService.swift
-  Sources/UI/AudioRoutingView.swift)
+  Sources/UI/About/AboutView.swift
+  Sources/UI/Chain/ChainView.swift
+  Sources/UI/Dashboard/DashboardView.swift
+  Sources/UI/Diagnostics/DiagnosticsView.swift
+  Sources/UI/MainView.swift
+  Sources/UI/MenuBarView.swift
+  Sources/UI/Onboarding/OnboardingView.swift
+  Sources/UI/Plugins/PluginsView.swift
+  Sources/UI/Settings/SettingsView.swift
+  Sources/UI/Shared/ProductComponents.swift)
 target_link_libraries(Shitate PRIVATE
   ShitateBridge
   "-framework AppKit"
   "-framework AVFoundation"
+  "-framework Carbon"
+  "-framework ServiceManagement"
   "-framework SwiftUI")
 set_target_properties(Shitate PROPERTIES
   OUTPUT_NAME "Shi-tate"
@@ -312,8 +329,15 @@ if(BUILD_TESTING)
     $<$<COMPILE_LANGUAGE:CXX,OBJCXX>:-Wno-unnecessary-virtual-specifier>)
 
   xctest_add_bundle(ShitateSwiftTests Shitate
+    Sources/App/AppModel+Persistence.swift
+    Sources/App/AppModel+Plugins.swift
     Sources/App/ApplicationState.swift
+    Sources/App/AppModel.swift
     Sources/App/AudioDevice.swift
+    Sources/App/ProductModels.swift
+    Sources/App/SingleInstanceGuard.swift
+    Sources/Services/GlobalHotKeyService.swift
+    Sources/Services/LaunchAtLoginService.swift
     Sources/Services/MicrophonePermissionService.swift
     Sources/Services/Persistence/AtomicFileWriter.swift
     Sources/Services/Persistence/PersistenceModels.swift
@@ -323,6 +347,7 @@ if(BUILD_TESTING)
     Sources/Services/Persistence/SessionStore.swift
     Sources/Services/WorkspaceEventService.swift
     Tests/Swift/ApplicationStateTests.swift
+    Tests/Swift/AppModelWorkflowTests.swift
     Tests/Swift/AtomicFileWriterTests.swift
     Tests/Swift/AudioEnvironmentTests.swift
     Tests/Swift/BridgeVersionTests.swift
@@ -330,12 +355,16 @@ if(BUILD_TESTING)
     Tests/Swift/PersistenceStoreTests.swift
     Tests/Swift/PluginBundleDiscoveryTests.swift
     Tests/Swift/PluginCatalogStoreTests.swift
+    Tests/Swift/ProductModelTests.swift
     Tests/Swift/SessionStoreTests.swift
+    Tests/Swift/SystemServiceTests.swift
     Tests/Swift/WorkspaceEventServiceTests.swift)
   target_link_libraries(ShitateSwiftTests PRIVATE
     ShitateBridge
     "-framework AppKit"
-    "-framework AVFoundation")
+    "-framework AVFoundation"
+    "-framework Carbon"
+    "-framework ServiceManagement")
   target_link_options(ShitateSwiftTests PRIVATE
     "LINKER:-force_load,$<TARGET_FILE:ShitateBridge>"
     "LINKER:-force_load,$<TARGET_FILE:ShitateCore>")

@@ -128,26 +128,32 @@ struct AudioDiagnostics: Equatable {
 @MainActor
 @Observable
 final class AppModel: NSObject, STAudioEngineBridgeDelegate {
-    private enum DefaultsKey {
-        static let inputUID = "audio.inputUID"
-        static let inputChannel = "audio.inputChannel"
-        static let blackHoleUID = "audio.blackHoleUID"
-        static let routingMode = "audio.routingMode"
-        static let manualOutputChannelStart = "audio.manualOutputChannelStart"
-        static let bufferFrames = "audio.bufferFrames"
-        static let resumeAfterWake = "audio.resumeAfterWake"
-    }
-
-    private let bridge: STAudioEngineBridge
+    let bridge: STAudioEngineBridge
     private let permissionFlow: MicrophonePermissionFlow
     private let workspaceEvents: WorkspaceEventService
     let pluginCatalog: PluginCatalogService
-    private let defaults: UserDefaults
+    let paths: ApplicationPaths
+    let settingsStore: SettingsStore
+    let sessionStore: SessionStore
+    let auxiliaryStore: AuxiliaryPersistenceStore
+    let launchAtLoginService: LaunchAtLoginService
+    let globalHotKeyService: GlobalHotKeyService
     @ObservationIgnored nonisolated(unsafe) private var meterTask: Task<Void, Never>?
+    @ObservationIgnored private var terminationCompletion: (@MainActor @Sendable (Bool) -> Void)?
+    @ObservationIgnored private var isTerminationFinalizing = false
+    @ObservationIgnored private var sessionSaveInFlight = false
+    @ObservationIgnored private var sessionSaveFailed = false
     private var bootstrapped = false
+    private var startRoutingAtLaunchPending = false
     private var nextPermissionCheck = ContinuousClock.now
+    var loadedSession: PersistedSession?
+    var operationAfterStop: PendingAudioOperation?
+    var resumeAfterOperation = false
+    var approvedAdHocFingerprints = Set<String>()
+    var failedRestoreSlotIDs = Set<UUID>()
 
     var state: ApplicationState = .booting
+    var settings: SettingsDocument = .defaults
     var inputDevices: [AudioDevice] = []
     var outputDevices: [AudioDevice] = []
     var selectedInputUID: String?
@@ -163,32 +169,43 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     var lastTransitionError: ApplicationTransitionError?
     var pluginCatalogError: String?
     var canAcceptDetectedBlackHole = false
+    var pluginSlots: [PluginSlotPresentation] = []
+    var sessionWorkflow: SessionWorkflowState = .notLoaded
+    var pendingAudioOperation: PendingAudioOperation?
+    var isPluginOperationInFlight = false
+    var ephemeralReducedChain = false
+    var selectedSection: ProductSection = .dashboard
+    var isOnboardingPresented = false
+    var onboardingStep: OnboardingStep = .welcome
+    var pluginSearchText = ""
+    var pluginCompatibilityFilter: PluginCompatibilityFilter = .all
+    var pluginManufacturerFilter = "All Manufacturers"
+    var additionalPluginFolders: [String] = []
+    var onboardingError: String?
+    var persistenceBlocksRouting = false
 
     init(
         bridge: STAudioEngineBridge = STAudioEngineBridge(),
         permissionProvider: any MicrophonePermissionProviding = MicrophonePermissionService(),
         workspaceEvents: WorkspaceEventService = WorkspaceEventService(),
         pluginCatalog: PluginCatalogService = PluginCatalogService(),
-        defaults: UserDefaults = .standard
+        paths: ApplicationPaths = .live,
+        settingsStore: SettingsStore? = nil,
+        sessionStore: SessionStore? = nil,
+        auxiliaryStore: AuxiliaryPersistenceStore? = nil,
+        launchAtLoginService: LaunchAtLoginService = LaunchAtLoginService(),
+        globalHotKeyService: GlobalHotKeyService = GlobalHotKeyService()
     ) {
         self.bridge = bridge
         permissionFlow = MicrophonePermissionFlow(provider: permissionProvider)
         self.workspaceEvents = workspaceEvents
         self.pluginCatalog = pluginCatalog
-        self.defaults = defaults
-        selectedInputUID = defaults.string(forKey: DefaultsKey.inputUID)
-        selectedInputChannel = defaults.integer(forKey: DefaultsKey.inputChannel)
-        routingMode =
-            AudioRoutingSelection(
-                rawValue: defaults.integer(forKey: DefaultsKey.routingMode)
-            ) ?? .automaticPrivateAggregate
-        manualOutputChannelStart = defaults.integer(
-            forKey: DefaultsKey.manualOutputChannelStart
-        )
-        let savedBuffer = defaults.integer(forKey: DefaultsKey.bufferFrames)
-        bufferFrames = savedBuffer == 0 ? 256 : savedBuffer
-        blackHoleUID = defaults.string(forKey: DefaultsKey.blackHoleUID)
-        defaults.set(false, forKey: DefaultsKey.resumeAfterWake)
+        self.paths = paths
+        self.settingsStore = settingsStore ?? SettingsStore(paths: paths)
+        self.sessionStore = sessionStore ?? SessionStore(paths: paths)
+        self.auxiliaryStore = auxiliaryStore ?? AuxiliaryPersistenceStore(paths: paths)
+        self.launchAtLoginService = launchAtLoginService
+        self.globalHotKeyService = globalHotKeyService
         super.init()
         bridge.delegate = self
         workspaceEvents.onWillSleep = { [weak self] in
@@ -233,10 +250,41 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         !isRoutingActive
             && configurationValues() != nil
             && permissionFlow.status == .authorized
+            && !persistenceBlocksRouting
     }
 
     var canStartRouting: Bool {
         state == .readyStopped
+            && (sessionWorkflow == .complete || sessionWorkflow == .restoreSkipped
+                || ephemeralReducedChain)
+            && !persistenceBlocksRouting
+    }
+
+    var canEditPluginChain: Bool {
+        sessionWorkflow == .complete
+            && !isPluginOperationInFlight
+            && pendingAudioOperation == nil
+            && operationAfterStop == nil
+            && state != .starting
+            && state != .stopping
+            && !terminationIsPending
+    }
+
+    var canAddPlugin: Bool {
+        canEditPluginChain && pluginSlots.count < SessionDocument.maximumSlots
+    }
+
+    var canRecoverSession: Bool {
+        if case .incomplete = sessionWorkflow {
+            return loadedSession != nil
+                && !isPluginOperationInFlight
+                && pendingAudioOperation == nil
+                && operationAfterStop == nil
+                && state != .starting
+                && state != .stopping
+                && !terminationIsPending
+        }
+        return false
     }
 
     var isRoutingActive: Bool {
@@ -244,70 +292,23 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     }
 
     var statusTitle: String {
-        switch state {
-        case .booting, .checkingEnvironment:
-            "Checking Audio"
-        case .needsBlackHole:
-            "BlackHole Required"
-        case .needsMicrophonePermission:
-            "Microphone Access Required"
-        case .needsAudioConfiguration:
-            "Audio Setup Required"
-        case .readyStopped:
-            "Ready"
-        case .starting:
-            "Starting"
-        case .running:
-            "Routing"
-        case .muted:
-            "Muted"
-        case .stopping:
-            "Stopping"
-        case .recovering:
-            "Recovering"
-        case .blocked:
-            "Routing Blocked"
-        case .safeMode:
-            "Safe Mode"
-        case .fatal:
-            "Fatal Error"
-        }
+        ApplicationStatePresentation(state: state).title
     }
 
     var statusDetail: String {
-        switch state {
-        case .needsBlackHole:
-            "BlackHole 2ch is missing or its saved identity changed. No alternate output was selected."
-        case .needsMicrophonePermission:
-            "Allow microphone access before routing. Output remains silent."
-        case .needsAudioConfiguration:
-            "Choose an input, channel, routing mode, and supported buffer in Audio Settings."
-        case .readyStopped:
-            "Audio is configured and stopped."
-        case .running:
-            "The selected input is routed to BlackHole 2ch."
-        case .muted:
-            "Routing is active with master output muted."
-        case .blocked:
-            "Routing stopped safely. Review the error and Audio Settings."
-        default:
-            "Shi-tate keeps output silent until every routing requirement is valid."
-        }
+        ApplicationStatePresentation(state: state).detail
     }
 
     var statusSymbol: String {
-        switch state {
-        case .running:
-            "waveform.circle.fill"
-        case .muted:
-            "mic.slash"
-        case .needsBlackHole, .needsMicrophonePermission, .needsAudioConfiguration, .blocked:
-            "exclamationmark.triangle"
-        case .fatal:
-            "xmark.octagon"
-        default:
-            "waveform.circle"
-        }
+        ApplicationStatePresentation(state: state).symbol
+    }
+
+    var statePresentation: ApplicationStatePresentation {
+        ApplicationStatePresentation(state: state)
+    }
+
+    var hasMicrophonePermission: Bool {
+        permissionFlow.status == .authorized
     }
 
     func bootstrap() async {
@@ -316,9 +317,19 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         }
         bootstrapped = true
         workspaceEvents.start()
+        loadUserState()
+        startRoutingAtLaunchPending = settings.startRoutingAtLaunch
+        configureSystemPreferences()
         do {
             try pluginCatalog.load()
-            let refresh = try pluginCatalog.refreshDiscoveredBundles()
+            approvedAdHocFingerprints = PluginApprovalAuthority.approvedAdHocFingerprints(
+                allowAdHocSignedPlugins: settings.pluginPolicy.allowAdHocSignedPlugins,
+                entries: pluginCatalog.document.entries
+            )
+            let refresh = try pluginCatalog.refreshDiscoveredBundles(
+                inAdditionalFolders: additionalPluginFolders,
+                approvedAdHocFingerprints: approvedAdHocFingerprints
+            )
             if !refresh.failedBundlePaths.isEmpty {
                 pluginCatalogError =
                     "Some VST3 plug-ins could not be validated. They remain unavailable."
@@ -327,10 +338,15 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
             pluginCatalogError = "The plug-in catalog could not be validated. Rescan plug-ins."
         }
         refreshEnvironment()
+        restoreSavedSession()
         startMeterPolling()
     }
 
     func refreshEnvironment(acceptDetectedBlackHole: Bool = false) {
+        guard !persistenceBlocksRouting else {
+            apply(.engineFailed(.unexpectedEngineState))
+            return
+        }
         guard apply(.beginEnvironmentCheck) == .checkingEnvironment else {
             return
         }
@@ -362,7 +378,9 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
             return
         case .available(let uid):
             blackHoleUID = uid
-            defaults.set(uid, forKey: DefaultsKey.blackHoleUID)
+            settings.audio.outputDeviceUID = uid
+            settings.audio.outputDeviceName = AudioEnvironment.blackHoleDisplayName
+            persistSettings()
         }
 
         guard permissionFlow.status == .authorized else {
@@ -419,6 +437,7 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
             persistConfiguration()
             lastError = nil
             apply(.engineConfigured)
+            attemptStartRoutingAtLaunch()
         } catch {
             handleBridgeError(error as NSError)
         }
@@ -447,6 +466,27 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
             return
         }
         bridge.stop()
+    }
+
+    func prepareForTermination(
+        completion: @escaping @MainActor @Sendable (Bool) -> Void
+    ) {
+        guard terminationCompletion == nil else {
+            return
+        }
+        terminationCompletion = completion
+        pendingAudioOperation = nil
+        operationAfterStop = nil
+        resumeAfterOperation = false
+        globalHotKeyService.unregister()
+
+        if bridgeIsRoutingActive {
+            if state == .starting || state == .running || state == .muted {
+                apply(.stopRequested)
+            }
+            bridge.stop()
+        }
+        continueTerminationIfPossible()
     }
 
     func toggleMute() {
@@ -527,11 +567,18 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     }
 
     private func persistConfiguration() {
-        defaults.set(selectedInputUID, forKey: DefaultsKey.inputUID)
-        defaults.set(selectedInputChannel, forKey: DefaultsKey.inputChannel)
-        defaults.set(routingMode.rawValue, forKey: DefaultsKey.routingMode)
-        defaults.set(manualOutputChannelStart, forKey: DefaultsKey.manualOutputChannelStart)
-        defaults.set(bufferFrames, forKey: DefaultsKey.bufferFrames)
+        settings.audio.mode =
+            routingMode == .automaticPrivateAggregate
+            ? .automaticPrivateAggregate : .manualAggregate
+        settings.audio.inputDeviceUID = selectedInputUID ?? ""
+        settings.audio.inputDeviceName = selectedInput?.displayName ?? ""
+        settings.audio.inputChannelIndex = selectedInputChannel
+        settings.audio.outputDeviceUID = blackHoleUID ?? ""
+        settings.audio.outputDeviceName = AudioEnvironment.blackHoleDisplayName
+        settings.audio.manualOutputChannelStart = manualOutputChannelStart
+        settings.audio.sampleRate = 48_000
+        settings.audio.bufferFrames = bufferFrames
+        persistSettings()
     }
 
     private func startMeterPolling() {
@@ -587,30 +634,22 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     }
 
     private func handleEngineStatus(_ status: STEngineStatus) {
-        switch status {
-        case .stopped:
-            apply(.engineStopped)
-        case .configured:
-            apply(.engineConfigured)
-        case .starting:
-            if state == .readyStopped {
-                apply(.startRequested)
-            }
-        case .running:
+        let wasStopping = state == .stopping
+        if status == .running {
             isMuted = false
-            apply(.engineStarted)
-        case .muted:
+        } else if status == .muted {
             isMuted = true
-            apply(.muteChanged(true))
-        case .stopping:
-            if state == .running || state == .muted || state == .starting {
-                apply(.stopRequested)
-            }
-        case .blocked:
-            apply(.engineBlocked)
-        @unknown default:
-            apply(.engineFailed(.unexpectedEngineState))
         }
+
+        let event = EngineStatusEventMapper.event(for: status, while: state)
+        apply(event)
+
+        if status == .stopped || (status == .configured && wasStopping) {
+            handleEngineStoppedWorkflow()
+        } else if status == .configured {
+            attemptStartRoutingAtLaunch()
+        }
+        continueTerminationIfPossible()
     }
 
     private func handleBridgeError(_ error: NSError) {
@@ -663,6 +702,17 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         }
     }
 
+    nonisolated func audioEngineBridge(
+        _ bridge: STAudioEngineBridge,
+        didFaultPluginSlotWith slotID: UUID
+    ) {
+        Task { @MainActor [weak self] in
+            self?.refreshPluginSlots()
+            self?.lastError =
+                "A plug-in faulted and was bypassed for safety. Routing continued with its input."
+        }
+    }
+
     private func refreshDeviceCatalog() {
         reloadDeviceCatalog()
 
@@ -687,7 +737,9 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         case .available(let uid):
             canAcceptDetectedBlackHole = false
             blackHoleUID = uid
-            defaults.set(uid, forKey: DefaultsKey.blackHoleUID)
+            settings.audio.outputDeviceUID = uid
+            settings.audio.outputDeviceName = AudioEnvironment.blackHoleDisplayName
+            persistSettings()
             if selectedInputUID != nil, selectedInput == nil {
                 lastError = "The selected input device is no longer available."
                 apply(.audioConfigurationInvalid)
@@ -705,7 +757,7 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     }
 
     @discardableResult
-    private func apply(_ event: ApplicationEvent) -> ApplicationState {
+    func apply(_ event: ApplicationEvent) -> ApplicationState {
         do {
             let next = try ApplicationStateReducer.reduce(state, event)
             state = next
@@ -718,5 +770,89 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
             state = .fatal(.bridge(error.localizedDescription))
             return state
         }
+    }
+
+    func attemptStartRoutingAtLaunch() {
+        guard
+            startRoutingAtLaunchPending,
+            state == .readyStopped,
+            sessionWorkflow == .complete,
+            !isOnboardingPresented,
+            !persistenceBlocksRouting
+        else {
+            return
+        }
+        startRoutingAtLaunchPending = false
+        startRouting()
+    }
+
+    func cancelStartRoutingAtLaunch() {
+        startRoutingAtLaunchPending = false
+    }
+
+    var terminationIsPending: Bool {
+        terminationCompletion != nil
+    }
+
+    func beginSessionSave() -> Bool {
+        guard !sessionSaveInFlight else {
+            return false
+        }
+        sessionSaveInFlight = true
+        return true
+    }
+
+    func recordSessionSaveFinished(success: Bool) {
+        sessionSaveInFlight = false
+        sessionSaveFailed = !success
+    }
+
+    func continueTerminationIfPossible() {
+        guard
+            terminationCompletion != nil,
+            !isTerminationFinalizing,
+            !bridgeIsRoutingActive,
+            !isPluginOperationInFlight,
+            !sessionSaveInFlight,
+            sessionWorkflow != .restoring
+        else {
+            return
+        }
+
+        isTerminationFinalizing = true
+        for slot in bridge.pluginSlots() {
+            try? bridge.closeEditorForPluginSlot(with: slot.slotID)
+        }
+
+        guard !sessionSaveFailed else {
+            finishTermination(clean: false)
+            return
+        }
+        guard sessionWorkflow == .complete, !ephemeralReducedChain else {
+            finishTermination(clean: true)
+            return
+        }
+
+        saveCurrentSession { [weak self] success in
+            self?.finishTermination(clean: success)
+        }
+    }
+
+    private var bridgeIsRoutingActive: Bool {
+        switch bridge.status {
+        case .starting, .running, .muted, .stopping:
+            true
+        case .stopped, .configured, .blocked:
+            false
+        @unknown default:
+            true
+        }
+    }
+
+    private func finishTermination(clean: Bool) {
+        let completion = terminationCompletion
+        terminationCompletion = nil
+        isTerminationFinalizing = false
+        completion?(clean)
     }
 }

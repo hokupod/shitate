@@ -6,6 +6,8 @@ import Observation
 
 enum PluginCatalogServiceError: Error {
     case invalidBridgeDescriptor
+    case entryUnavailable
+    case runtimeDescriptorUnavailable
 }
 
 enum PluginBundleDiscoveryError: Error, Equatable {
@@ -128,6 +130,10 @@ final class PluginCatalogService {
 
     private(set) var document = PluginCatalogDocument()
 
+    var scanProgress: STPluginScanProgress {
+        bridge.scanProgress
+    }
+
     init(
         bridge: STPluginBridge = STPluginBridge(),
         store: PluginCatalogStore = PluginCatalogStore(
@@ -160,7 +166,8 @@ final class PluginCatalogService {
 
     @discardableResult
     func refreshDiscoveredBundles(
-        inAdditionalFolders additionalFolders: [String] = []
+        inAdditionalFolders additionalFolders: [String] = [],
+        approvedAdHocFingerprints: Set<String> = []
     ) throws -> PluginCatalogRefreshResult {
         let additionalRoots = try bridge.validatedAdditionalFolders(additionalFolders)
         let bundlePaths = try discovery.candidates(
@@ -176,7 +183,10 @@ final class PluginCatalogService {
                 continue
             }
             do {
-                try rescanBundle(at: bundlePath)
+                try rescanBundle(
+                    at: bundlePath,
+                    approvedAdHocFingerprints: approvedAdHocFingerprints
+                )
                 scannedPaths.append(bundlePath)
             } catch {
                 failedPaths.append(bundlePath)
@@ -253,6 +263,68 @@ final class PluginCatalogService {
         try store.save(candidate)
         document = candidate
         bridge.removeCatalogEntriesNot(atPaths: canonicalPaths)
+    }
+
+    func validatedAdditionalFolders(_ folders: [String]) throws -> [String] {
+        try bridge.validatedAdditionalFolders(folders)
+    }
+
+    func runtimeDescriptor(
+        fingerprint: String,
+        approvedAdHocFingerprints: Set<String>
+    ) throws -> STPluginDescriptor {
+        guard
+            let persisted = document.entries.first(where: { $0.fingerprint == fingerprint }),
+            persisted.compatibility == .compatible
+        else {
+            throw PluginCatalogServiceError.entryUnavailable
+        }
+        let approved: Set<String>
+        if persisted.signatureKind == .adHoc,
+            approvedAdHocFingerprints.contains(fingerprint)
+        {
+            approved = [fingerprint]
+        } else {
+            approved = []
+        }
+        let descriptors = try bridge.rescanBundle(
+            atPath: persisted.bundlePath,
+            approvedAdHocFingerprints: approved
+        )
+        let replacements = try descriptors.map(entry)
+        guard replacements.allSatisfy({ $0.bundlePath == persisted.bundlePath }) else {
+            throw PluginCatalogServiceError.invalidBridgeDescriptor
+        }
+
+        let candidate = PluginCatalogDocument(
+            entries: (document.entries.filter { $0.bundlePath != persisted.bundlePath }
+                + replacements).sorted {
+                    ($0.name, $0.fingerprint) < ($1.name, $1.fingerprint)
+                }
+        )
+        try store.save(candidate)
+        document = candidate
+        _ = try Self.validatedRuntimeEntry(
+            fingerprint: fingerprint,
+            in: replacements
+        )
+        guard let runtime = descriptors.first(where: { $0.fingerprint == fingerprint }) else {
+            throw PluginCatalogServiceError.runtimeDescriptorUnavailable
+        }
+        return runtime
+    }
+
+    static func validatedRuntimeEntry(
+        fingerprint: String,
+        in replacements: [PluginCatalogEntry]
+    ) throws -> PluginCatalogEntry {
+        guard
+            let entry = replacements.first(where: { $0.fingerprint == fingerprint }),
+            entry.compatibility == .compatible
+        else {
+            throw PluginCatalogServiceError.runtimeDescriptorUnavailable
+        }
+        return entry
     }
 
     private func liveIdentityMatches(_ entry: PluginCatalogEntry) -> Bool {

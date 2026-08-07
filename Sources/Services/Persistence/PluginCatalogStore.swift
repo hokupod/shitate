@@ -17,7 +17,7 @@ enum PluginCatalogCompatibility: String, Codable, Sendable {
     case blocked
 }
 
-struct PluginCatalogEntry: Codable, Equatable, Sendable {
+struct PluginCatalogEntry: Codable, Equatable, Identifiable, Sendable {
     let fingerprint: String
     let bundlePath: String
     let classUID: String
@@ -38,6 +38,8 @@ struct PluginCatalogEntry: Codable, Equatable, Sendable {
     let scannerProtocol: Int
     let compatibleAppVersion: String
     let lastScannedAt: String
+
+    var id: String { fingerprint }
 }
 
 struct PluginCatalogDocument: Codable, Equatable, Sendable {

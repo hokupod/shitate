@@ -87,6 +87,27 @@ Automated tests cover the build, audio core, scanner isolation, and deterministi
 in-tree VST3 fixtures. They do not prove production readiness or compatibility
 with a particular third-party plug-in.
 
+## Try the development app
+
+After building, launch the local Debug app:
+
+```bash
+open build/dev/Debug/Shi-tate.app
+```
+
+The native onboarding flow checks BlackHole 2ch, requests microphone access,
+validates a physical input at 48 kHz, scans local VST3, saves the default
+session, and explains the call-app selection. An empty plug-in chain is a valid
+passthrough setup. Shi-tate never installs BlackHole or a plug-in for you.
+
+Select BlackHole 2ch as the microphone inside the communication app, then start
+routing from the Dashboard or menu bar. `Control-Shift-M` toggles master mute
+without Accessibility permission. Closing the main window leaves the menu-bar
+utility running; use Quit to terminate it.
+
+See [manual audio QA](docs/manual-qa.md) for the exact verified and unverified
+hardware/product-flow evidence.
+
 ## Privacy and security
 
 Shi-tate is designed without audio storage, telemetry, crash upload, analytics,
