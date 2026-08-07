@@ -3,3 +3,4 @@
 
 #import "STAudioEngineBridge.h"
 #import "STModels.h"
+#import "STPluginBridge.h"

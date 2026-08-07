@@ -131,6 +131,7 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     private let bridge: STAudioEngineBridge
     private let permissionFlow: MicrophonePermissionFlow
     private let workspaceEvents: WorkspaceEventService
+    let pluginCatalog: PluginCatalogService
     private let defaults: UserDefaults
     @ObservationIgnored nonisolated(unsafe) private var meterTask: Task<Void, Never>?
     private var bootstrapped = false
@@ -149,17 +150,20 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
     var diagnostics: AudioDiagnostics = .empty
     var isMuted = false
     var lastError: String?
+    var pluginCatalogError: String?
     var canAcceptDetectedBlackHole = false
 
     init(
         bridge: STAudioEngineBridge = STAudioEngineBridge(),
         permissionProvider: any MicrophonePermissionProviding = MicrophonePermissionService(),
         workspaceEvents: WorkspaceEventService = WorkspaceEventService(),
+        pluginCatalog: PluginCatalogService = PluginCatalogService(),
         defaults: UserDefaults = .standard
     ) {
         self.bridge = bridge
         permissionFlow = MicrophonePermissionFlow(provider: permissionProvider)
         self.workspaceEvents = workspaceEvents
+        self.pluginCatalog = pluginCatalog
         self.defaults = defaults
         selectedInputUID = defaults.string(forKey: DefaultsKey.inputUID)
         selectedInputChannel = defaults.integer(forKey: DefaultsKey.inputChannel)
@@ -301,6 +305,16 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         }
         bootstrapped = true
         workspaceEvents.start()
+        do {
+            try pluginCatalog.load()
+            let refresh = try pluginCatalog.refreshDiscoveredBundles()
+            if !refresh.failedBundlePaths.isEmpty {
+                pluginCatalogError =
+                    "Some VST3 plug-ins could not be validated. They remain unavailable."
+            }
+        } catch {
+            pluginCatalogError = "The plug-in catalog could not be validated. Rescan plug-ins."
+        }
         refreshEnvironment()
         startMeterPolling()
     }

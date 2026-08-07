@@ -14,8 +14,8 @@ dual mono形式传送给通话应用。
 ## 状态
 
 > [!WARNING]
-> **Pre-alpha — 尚不可用。** 当前没有可安装的应用，也没有通过验证的音频路径。
-> `0.1.0-dev`仍在实现中。
+> **Pre-alpha — 尚未达到生产可用状态。** `0.1.0-dev`仍在实现中。目前没有
+> 可安装的release，也没有广泛的第三方VST3兼容性证据。
 
 在相应的自动与手动验证证据发布之前，请勿在通话、录音或生产工作流中依赖它。
 
@@ -59,12 +59,14 @@ SwiftUI负责产品UI和本地状态。轻量Objective-C++ bridge隔离C++20/JUC
 - 从官方项目单独安装的BlackHole 2ch
 - 用户提供的兼容arm64或Universal VST3 Audio Effect
 
+选择插件前，请阅读范围有限的[VST3兼容性与扫描约定](docs/plugin-compatibility.md)。
+
 JUCE固定在commit
 `f8f8864172464b9adf9eba6101e1f784838d1597`。
 
 ## 构建与测试
 
-以下是计划中的统一接口，但在**build foundation完成前不可用**：
+在repository root中运行以下受支持的开发workflow：
 
 ```bash
 nix develop
@@ -76,7 +78,8 @@ nix develop
 ./scripts/check-docs.sh
 ```
 
-目前没有证据证明应用可以构建、启动、路由音频或托管第三方插件。
+自动测试覆盖build、audio core、scanner隔离和确定性的仓库内VST3 fixture。
+这些测试不能证明生产可用性，也不能证明与特定第三方插件兼容。
 
 ## 隐私与安全
 

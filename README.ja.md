@@ -14,8 +14,8 @@ Shi-tateは、通話へ届く前のマイク信号を自分向けに仕立てま
 ## ステータス
 
 > [!WARNING]
-> **プレアルファ — まだ利用できません。** インストール可能なアプリと検証済み
-> 音声経路は存在しません。現在は`0.1.0-dev`を実装中です。
+> **プレアルファ — まだ本番利用できません。** 現在は`0.1.0-dev`を実装中です。
+> インストール可能なreleaseと、第三者VST3への広範な互換性実績はありません。
 
 対応する自動・手動検証結果が公開されるまでは、通話、録音、本番ワークフローへ
 依存しないでください。
@@ -61,12 +61,15 @@ C++20/JUCE audio coreを分離します。main targetは`Shitate`、配布アプ
 - 公式プロジェクトから別途インストールしたBlackHole 2ch
 - 利用者が用意した互換arm64またはUniversal VST3 Audio Effect
 
+pluginを選ぶ前に、限定的な[VST3互換性・スキャン契約](docs/plugin-compatibility.md)
+を確認してください。
+
 JUCEはcommit
 `f8f8864172464b9adf9eba6101e1f784838d1597`へ固定します。
 
 ## ビルドとテスト
 
-以下は予定している共通interfaceですが、**build foundation実装までは利用できません**。
+repository rootから、対応する開発workflowを実行します。
 
 ```bash
 nix develop
@@ -78,7 +81,8 @@ nix develop
 ./scripts/check-docs.sh
 ```
 
-現時点では、build、起動、音声routing、第三者plugin hostの成功実績はありません。
+自動テストはbuild、audio core、scanner隔離、決定的な同梱テスト用VST3 fixtureを
+検証します。本番利用や特定の第三者pluginとの互換性を証明するものではありません。
 
 ## プライバシーとセキュリティ
 

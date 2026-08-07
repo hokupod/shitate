@@ -15,8 +15,9 @@ call.
 ## Status
 
 > [!WARNING]
-> **Pre-alpha — not yet usable.** There is no installable application or tested
-> audio path yet. Version `0.1.0-dev` is under implementation.
+> **Pre-alpha — not yet production-ready.** Version `0.1.0-dev` is under
+> implementation. There is no installable release or broad third-party VST3
+> compatibility evidence.
 
 Do not rely on Shi-tate for a call, recording, or production workflow until the
 relevant automated and manual evidence is published.
@@ -62,13 +63,15 @@ See the [canonical detailed design](docs/design.md).
 - BlackHole 2ch installed separately from its official project
 - User-provided, compatible arm64 or Universal VST3 Audio Effects
 
+See the narrow [VST3 compatibility and scanning contract](docs/plugin-compatibility.md)
+before selecting a plug-in.
+
 JUCE is pinned to commit
 `f8f8864172464b9adf9eba6101e1f784838d1597`.
 
 ## Build and test
 
-These commands are the planned interface but are **unavailable until the build
-foundation lands**:
+Run the supported development workflow from the repository root:
 
 ```bash
 nix develop
@@ -80,8 +83,9 @@ nix develop
 ./scripts/check-docs.sh
 ```
 
-No current result proves that the app builds, launches, routes audio, or hosts a
-third-party plug-in.
+Automated tests cover the build, audio core, scanner isolation, and deterministic
+in-tree VST3 fixtures. They do not prove production readiness or compatibility
+with a particular third-party plug-in.
 
 ## Privacy and security
 

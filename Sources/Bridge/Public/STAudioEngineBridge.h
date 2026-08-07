@@ -23,6 +23,11 @@ typedef NS_ERROR_ENUM(STBridgeErrorDomain, STBridgeErrorCode){
     STBridgeErrorCodeEngineXRun = 108,
     STBridgeErrorCodeInvalidConfiguration = 109,
     STBridgeErrorCodeCallbackLayoutInvalid = 110,
+    STBridgeErrorCodeInvalidPluginPath = 200,
+    STBridgeErrorCodePluginSignatureRejected = 201,
+    STBridgeErrorCodePluginScanFailed = 202,
+    STBridgeErrorCodeInvalidPluginFolder = 203,
+    STBridgeErrorCodePluginScannerUnavailable = 204,
 };
 
 @class STAudioEngineBridge;

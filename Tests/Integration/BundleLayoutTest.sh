@@ -30,9 +30,27 @@ if [[ ! -x "$app_executable" || ! -x "$helper" ]]; then
   exit 1
 fi
 
+if ! /usr/bin/codesign --verify --strict --deep "$app_bundle" \
+  || ! /usr/bin/codesign --verify --strict "$helper"; then
+  printf 'app or embedded helper signature is invalid\n' >&2
+  exit 1
+fi
+
+helper_identifier=$(/usr/bin/codesign -d --verbose=4 "$helper" 2>&1 \
+  | /usr/bin/sed -n 's/^Identifier=//p')
+if [[ "$helper_identifier" != "dev.hokupod.shitate.plugin-scanner" ]]; then
+  printf 'unexpected helper signing identifier: %s\n' "$helper_identifier" >&2
+  exit 1
+fi
+
 if [[ -e "$resources/ShitatePluginScanner" \
   || -e "$app_bundle/Contents/MacOS/ShitatePluginScanner" ]]; then
   printf 'helper is present outside Contents/Helpers\n' >&2
+  exit 1
+fi
+
+if find "$app_bundle" -type d -name '*Plugin.vst3' -print -quit | grep -q .; then
+  printf 'test VST3 fixture leaked into the app bundle\n' >&2
   exit 1
 fi
 

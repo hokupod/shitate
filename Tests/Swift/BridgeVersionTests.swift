@@ -21,4 +21,21 @@ final class BridgeVersionTests: XCTestCase {
             XCTAssertEqual(error.localizedDescription, "bridge exception mapping test")
         }
     }
+
+    func testPluginBridgeExposesStandardPathsAndRejectsRelativeFolders() throws {
+        let bridge = STPluginBridge()
+
+        XCTAssertTrue(
+            bridge.standardSearchPaths.contains("/Library/Audio/Plug-Ins/VST3")
+        )
+        XCTAssertThrowsError(try bridge.validatedAdditionalFolders(["relative/VST3"])) {
+            error in
+            let error = error as NSError
+            XCTAssertEqual(error.domain, STBridgeErrorDomain)
+            XCTAssertEqual(
+                error.code,
+                STBridgeError.Code.invalidPluginFolder.rawValue
+            )
+        }
+    }
 }

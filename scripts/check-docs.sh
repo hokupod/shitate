@@ -17,6 +17,7 @@ required_files=(
   README.ja.md
   README.zh-CN.md
   docs/design.md
+  docs/plugin-compatibility.md
   LICENSE
   LICENSES/AGPL-3.0-only.txt
   THIRD_PARTY_NOTICES.md
