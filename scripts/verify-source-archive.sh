@@ -4,6 +4,12 @@
 
 set -euo pipefail
 
+tar_bin=$(type -P tar || true)
+if [[ -z "$tar_bin" ]] ||
+  ! "$tar_bin" --version 2>/dev/null | grep -Fq 'tar (GNU tar)'; then
+  printf 'GNU tar is required; run this script through nix develop\n' >&2
+  exit 127
+fi
 if [[ $# -ne 1 ]]; then
   printf 'usage: %s <source.tar.zst>\n' "$0" >&2
   exit 2
@@ -17,7 +23,7 @@ if [[ -f "$archive.sha256" ]]; then
 fi
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/shitate-source-verify.XXXXXX")
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
-zstd -dc "$archive" | gtar -C "$test_root" -xf -
+zstd -dc "$archive" | "$tar_bin" -C "$test_root" -xf -
 source_root=$(find "$test_root" -mindepth 1 -maxdepth 1 -type d -print -quit)
 root_count=$(find "$test_root" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
 if [[ -z "$source_root" || "$root_count" != 1 ||

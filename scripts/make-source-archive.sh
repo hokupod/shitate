@@ -5,6 +5,12 @@
 set -euo pipefail
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+tar_bin=$(type -P tar || true)
+if [[ -z "$tar_bin" ]] ||
+  ! "$tar_bin" --version 2>/dev/null | grep -Fq 'tar (GNU tar)'; then
+  printf 'GNU tar is required; run this script through nix develop\n' >&2
+  exit 127
+fi
 version=${1:-}
 if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   printf 'usage: %s <X.Y.Z>\n' "$0" >&2
@@ -41,12 +47,12 @@ mkdir -m 700 "$staging"
 
 git -C "$repository_root" ls-files -z |
   grep -zv '^external/JUCE$' |
-  gtar -C "$repository_root" --null -T - -cf - |
-  gtar -C "$staging" -xf -
+  "$tar_bin" -C "$repository_root" --null -T - -cf - |
+  "$tar_bin" -C "$staging" -xf -
 mkdir -p "$staging/external/JUCE"
 git -C "$repository_root/external/JUCE" ls-files -z |
-  gtar -C "$repository_root/external/JUCE" --null -T - -cf - |
-  gtar -C "$staging/external/JUCE" -xf -
+  "$tar_bin" -C "$repository_root/external/JUCE" --null -T - -cf - |
+  "$tar_bin" -C "$staging/external/JUCE" -xf -
 
 (
   cd "$staging"
@@ -63,7 +69,7 @@ jq -n \
 
 source_date_epoch=${SOURCE_DATE_EPOCH:-$(git -C "$repository_root" show -s --format=%ct HEAD)}
 mkdir -p "$artifact_directory"
-gtar -C "$temporary_directory" \
+"$tar_bin" -C "$temporary_directory" \
   --sort=name \
   --mtime="@$source_date_epoch" \
   --owner=0 --group=0 --numeric-owner \
