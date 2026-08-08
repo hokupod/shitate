@@ -12,6 +12,10 @@ The Japanese word 仕立て means tailoring something for a particular person or
 purpose. Shi-tate lets you tailor your microphone signal before it reaches the
 call.
 
+<p align="center">
+  <img src="resources/AppIcon/Shitate-source.jpg" alt="Shi-tate mascot singing into a microphone" width="480">
+</p>
+
 ## Status
 
 > [!WARNING]
