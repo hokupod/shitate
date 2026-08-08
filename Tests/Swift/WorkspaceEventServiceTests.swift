@@ -60,15 +60,24 @@ final class WorkspaceEventServiceTests: XCTestCase {
             notificationCenter: NotificationCenter(),
             wakeDelay: .milliseconds(10)
         )
+        let wakeDelivered = expectation(description: "coalesced wake recovery")
+        let additionalWake = expectation(description: "no additional wake recovery")
+        additionalWake.isInverted = true
         var wakeCount = 0
         service.onDidWake = {
             wakeCount += 1
+            if wakeCount == 1 {
+                wakeDelivered.fulfill()
+            } else {
+                additionalWake.fulfill()
+            }
         }
 
         service.handleDidWake()
         service.handleDidWake()
         service.handleDidWake()
-        try? await Task.sleep(for: .milliseconds(30))
+        await fulfillment(of: [wakeDelivered], timeout: 1)
+        await fulfillment(of: [additionalWake], timeout: 0.1)
         XCTAssertEqual(wakeCount, 1)
         service.stop()
     }
