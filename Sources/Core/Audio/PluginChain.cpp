@@ -39,6 +39,15 @@ void PluginChain::releaseResources() noexcept {
     prepared_ = false;
 }
 
+void PluginChain::clearAfterCallbackQuiescence() noexcept {
+    releaseResources();
+    for (auto index = size_; index > 0; --index) {
+        slots_[index - 1].reset();
+    }
+    size_ = 0;
+    sessionComplete_ = true;
+}
+
 void PluginChain::process(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi,
                           int frames) noexcept {
     if (!running_.load(std::memory_order_acquire) || !prepared_ || !sessionComplete_) {

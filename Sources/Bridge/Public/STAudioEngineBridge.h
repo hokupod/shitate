@@ -98,6 +98,8 @@ typedef void (^STPluginStateCompletion)(NSData* _Nullable state, NSError* _Nulla
                           error:(NSError* _Nullable* _Nullable)error;
 - (BOOL)startWithError:(NSError* _Nullable* _Nullable)error;
 - (void)stop;
+/// Synchronously destroys hosted plug-ins on the main thread. This is a terminal operation.
+- (BOOL)shutdownForTerminationWithError:(NSError* _Nullable* _Nullable)error;
 - (void)setMasterMuted:(BOOL)muted;
 - (STMeterSnapshot*)meterSnapshot;
 - (STEngineDiagnostics*)diagnostics;

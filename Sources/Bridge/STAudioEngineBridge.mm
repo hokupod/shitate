@@ -332,8 +332,38 @@ NSError* exceptionError(const std::exception& exception) {
     }
 }
 
+- (BOOL)shutdownForTerminationWithError:(NSError**)error {
+    if (!requirePluginMainThread(error)) {
+        return NO;
+    }
+    if (self.pendingPluginOperation != nil) {
+        if (error != nullptr) {
+            *error = STMakeBridgeError(STBridgeErrorCodePluginMutationRequiresStop,
+                                       @"A plug-in operation is still in progress.");
+        }
+        return NO;
+    }
+
+    NSTimer* timer = _eventTimer;
+    _eventTimer = nil;
+    [timer invalidate];
+    self.delegate = nil;
+    [self.deliveredFaultSlots removeAllObjects];
+
+    BridgeStorage* bridgeStorage = storage(_storage);
+    if (bridgeStorage == nullptr) {
+        return YES;
+    }
+    _storage = nullptr;
+    @autoreleasepool {
+        bridgeStorage->controller.shutdown();
+        delete bridgeStorage;
+    }
+    return YES;
+}
+
 - (void)startEventTimer {
-    if (_eventTimer != nil) {
+    if (_eventTimer != nil || storage(_storage) == nullptr) {
         return;
     }
     __weak STAudioEngineBridge* weakSelf = self;
@@ -432,6 +462,11 @@ NSError* exceptionError(const std::exception& exception) {
         return;
     }
     if (operation == nil || completion == nil) {
+        return;
+    }
+    if (storage(_storage) == nullptr) {
+        completion(
+            STMakeBridgeError(STBridgeErrorCodeUnknown, @"The audio bridge is unavailable."));
         return;
     }
     if (self.pendingPluginOperation != nil || self.status == STEngineStatusStarting) {

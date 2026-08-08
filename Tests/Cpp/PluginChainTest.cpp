@@ -70,6 +70,30 @@ class PluginChainTest final : public juce::UnitTest {
         rollback.releaseResources();
         expectEquals(firstProbe->releaseCalls, 1);
 
+        beginTest("terminal clear releases and destroys every slot exactly once");
+        shitate::RealtimeEventQueue clearQueue;
+        shitate::PluginChain clearChain;
+        auto clearFirstProbe = std::make_shared<shitate::test::ProcessorProbe>();
+        auto clearSecondProbe = std::make_shared<shitate::test::ProcessorProbe>();
+        expect(
+            clearChain.addSlot(shitate::test::makeSlot(clearQueue, 1, {.probe = clearFirstProbe}))
+                .succeeded());
+        expect(
+            clearChain.addSlot(shitate::test::makeSlot(clearQueue, 2, {.probe = clearSecondProbe}))
+                .succeeded());
+        expect(clearChain.prepare().succeeded());
+        clearChain.clearAfterCallbackQuiescence();
+        expectEquals(static_cast<int>(clearChain.size()), 0);
+        expect(!clearChain.isPrepared());
+        expect(clearChain.isSessionComplete());
+        expectEquals(clearFirstProbe->releaseCalls, 1);
+        expectEquals(clearSecondProbe->releaseCalls, 1);
+        expectEquals(clearFirstProbe->destructionCalls, 1);
+        expectEquals(clearSecondProbe->destructionCalls, 1);
+        clearChain.clearAfterCallbackQuiescence();
+        expectEquals(clearFirstProbe->destructionCalls, 1);
+        expectEquals(clearSecondProbe->destructionCalls, 1);
+
         beginTest("three slots process serially and bypass is atomic while running");
         shitate::RealtimeEventQueue processQueue;
         shitate::PluginChain process;

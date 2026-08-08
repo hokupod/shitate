@@ -243,5 +243,10 @@ int main(int argc, char** argv) {
         std::cerr << "runtime host restored chain order mismatch\n";
         return 1;
     }
+    restored.chain.clearAfterCallbackQuiescence();
+    if (restored.chain.size() != 0) {
+        std::cerr << "runtime host terminal clear retained plug-in instances\n";
+        return 1;
+    }
     return 0;
 }

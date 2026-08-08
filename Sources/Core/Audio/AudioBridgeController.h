@@ -33,6 +33,8 @@ class AudioBridgeController final {
     [[nodiscard]] AudioResult start();
     void stop() noexcept;
     void failClosed() noexcept;
+    /// Terminal shutdown. Call only when the controller will no longer be used.
+    void shutdown() noexcept;
     void setMasterMuted(bool muted) noexcept;
 
     [[nodiscard]] plugins::PluginRuntimeResult

@@ -27,9 +27,17 @@ class AudioBridgeController::Impl final {
           engine(deviceService, eventQueue, &pluginChain) {}
 
     ~Impl() {
+        shutdown();
+    }
+
+    void shutdown() noexcept {
+        if (shutdownComplete) {
+            return;
+        }
+        shutdownComplete = true;
         engine.failClosed();
         editorWindows.closeAll();
-        pluginChain.releaseResources();
+        pluginChain.clearAfterCallbackQuiescence();
     }
 
     juce::ScopedJuceInitialiser_GUI guiInitialiser;
@@ -39,6 +47,7 @@ class AudioBridgeController::Impl final {
     plugins::PluginFactory factory;
     plugins::PluginEditorWindowManager editorWindows;
     AudioEngine engine;
+    bool shutdownComplete{false};
 };
 
 AudioBridgeController::AudioBridgeController() : AudioBridgeController(nullptr) {}
@@ -69,6 +78,10 @@ void AudioBridgeController::stop() noexcept {
 
 void AudioBridgeController::failClosed() noexcept {
     impl_->engine.failClosed();
+}
+
+void AudioBridgeController::shutdown() noexcept {
+    impl_->shutdown();
 }
 
 void AudioBridgeController::setMasterMuted(bool muted) noexcept {

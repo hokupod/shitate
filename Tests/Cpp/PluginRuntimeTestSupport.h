@@ -23,6 +23,7 @@ struct ProcessorProbe final {
     int prepareCalls{0};
     int releaseCalls{0};
     int processCalls{0};
+    int destructionCalls{0};
     int maximumFrames{0};
 };
 
@@ -55,6 +56,12 @@ class TestRuntimeProcessor final : public juce::AudioProcessor {
   public:
     explicit TestRuntimeProcessor(TestProcessorOptions options)
         : AudioProcessor(stereoBuses()), options_(std::move(options)) {}
+
+    ~TestRuntimeProcessor() override {
+        if (options_.probe != nullptr) {
+            ++options_.probe->destructionCalls;
+        }
+    }
 
     void prepareToPlay(double, int maximumBlockSize) override {
         if (options_.probe != nullptr) {

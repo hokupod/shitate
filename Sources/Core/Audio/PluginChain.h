@@ -21,6 +21,8 @@ class PluginChain final {
     [[nodiscard]] plugins::PluginRuntimeResult prepare(double sampleRate = requiredSampleRate,
                                                        int maximumBlockSize = maximumPluginFrames);
     void releaseResources() noexcept;
+    /// The caller must stop routing and wait for every process callback before calling this.
+    void clearAfterCallbackQuiescence() noexcept;
     void process(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi, int frames) noexcept;
     [[nodiscard]] plugins::PluginRuntimeResult
     validateAdd(const plugins::SlotId& id) const noexcept;

@@ -128,6 +128,23 @@ final class AppModelWorkflowTests: XCTestCase {
     }
 
     @MainActor
+    func testTerminationShutdownFailureKeepsRunStateUnclean() throws {
+        let fixture = try AppModelFixture()
+        defer { fixture.remove() }
+        let bridge = FailingTerminationBridge()
+        let model = fixture.makeModel(bridge: bridge)
+        _ = try model.runStateService.beginRun()
+        model.sessionWorkflow = .complete
+
+        var cleanResult: Bool?
+        model.prepareForTermination { cleanResult = $0 }
+
+        XCTAssertEqual(bridge.shutdownCalls, 1)
+        XCTAssertEqual(cleanResult, false)
+        XCTAssertEqual(model.runStateService.currentState?.cleanShutdown, false)
+    }
+
+    @MainActor
     func testEditorOpenFailureIsVisibleAndRecorded() throws {
         let fixture = try AppModelFixture()
         defer { fixture.remove() }
@@ -371,11 +388,12 @@ private final class AppModelFixture {
         )
     }
 
-    func makeModel() -> AppModel {
+    func makeModel(bridge: STAudioEngineBridge = STAudioEngineBridge()) -> AppModel {
         let catalog = PluginCatalogService(
             store: PluginCatalogStore(fileURL: root.appendingPathComponent("catalog.json"))
         )
         return AppModel(
+            bridge: bridge,
             permissionProvider: AppModelPermissionProvider(),
             workspaceEvents: WorkspaceEventService(notificationCenter: NotificationCenter()),
             pluginCatalog: catalog,
@@ -392,6 +410,15 @@ private final class AppModelFixture {
 
     nonisolated func remove() {
         try? FileManager.default.removeItem(at: root)
+    }
+}
+
+private final class FailingTerminationBridge: STAudioEngineBridge {
+    private(set) var shutdownCalls = 0
+
+    override func shutdownForTermination() throws {
+        shutdownCalls += 1
+        throw NSError(domain: STBridgeErrorDomain, code: STBridgeError.Code.unknown.rawValue)
     }
 }
 

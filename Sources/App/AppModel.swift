@@ -882,6 +882,9 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         operationAfterStop = nil
         resumeAfterOperation = false
         globalHotKeyService.unregister()
+        meterTask?.cancel()
+        meterTask = nil
+        workspaceEvents.stop()
 
         if bridgeIsRoutingActive {
             if state == .starting || state == .running || state == .muted {
@@ -1346,7 +1349,14 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
 
     private func finishTermination(clean: Bool) {
         var finalClean = clean
-        if clean, runStateService.currentState != nil {
+        do {
+            try bridge.shutdownForTermination()
+        } catch {
+            finalClean = false
+            lastError =
+                "Plug-in shutdown did not complete. The next launch will enter recovery mode."
+        }
+        if finalClean, runStateService.currentState != nil {
             do {
                 try runStateService.markClean(routingWasActive: false)
             } catch {

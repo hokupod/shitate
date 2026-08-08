@@ -73,6 +73,17 @@ final class BridgeVersionTests: XCTestCase {
         XCTAssertEqual(STAudioOutputTarget.systemPreview.rawValue, 1)
     }
 
+    func testTerminationShutdownIsSynchronousAndIdempotent() throws {
+        let bridge = STAudioEngineBridge()
+
+        try bridge.shutdownForTermination()
+        XCTAssertEqual(bridge.status, .blocked)
+        XCTAssertTrue(bridge.pluginSlots().isEmpty)
+
+        try bridge.shutdownForTermination()
+        XCTAssertEqual(bridge.status, .blocked)
+    }
+
     func testStoppedRuntimeMutationCompletesOnMainQueue() {
         let bridge = STAudioEngineBridge()
         let completion = expectation(description: "runtime mutation completion")
