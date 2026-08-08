@@ -114,12 +114,12 @@ jobs:
       contents: write
       id-token: write
     env:
-      SHITATE_ARTIFACT_DIR: ${{ runner.temp }}/shitate-artifacts
-      SHITATE_DMG: ${{ runner.temp }}/shitate-artifacts/Shi-tate_${{ needs.gate.outputs.version }}_arm64.dmg
-      SHITATE_DMG_SHA256: ${{ runner.temp }}/shitate-artifacts/Shi-tate_${{ needs.gate.outputs.version }}_arm64.dmg.sha256
-      SHITATE_SOURCE_ARCHIVE: ${{ runner.temp }}/shitate-artifacts/shitate-${{ needs.gate.outputs.version }}-source.tar.zst
-      SHITATE_SOURCE_SHA256: ${{ runner.temp }}/shitate-artifacts/shitate-${{ needs.gate.outputs.version }}-source.tar.zst.sha256
-      SHITATE_PROVENANCE: ${{ runner.temp }}/shitate-artifacts/provenance.json
+      SHITATE_ARTIFACT_DIR: ${{ github.workspace }}/../shitate-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
+      SHITATE_DMG: ${{ github.workspace }}/../shitate-artifacts-${{ github.run_id }}-${{ github.run_attempt }}/Shi-tate_${{ needs.gate.outputs.version }}_arm64.dmg
+      SHITATE_DMG_SHA256: ${{ github.workspace }}/../shitate-artifacts-${{ github.run_id }}-${{ github.run_attempt }}/Shi-tate_${{ needs.gate.outputs.version }}_arm64.dmg.sha256
+      SHITATE_SOURCE_ARCHIVE: ${{ github.workspace }}/../shitate-artifacts-${{ github.run_id }}-${{ github.run_attempt }}/shitate-${{ needs.gate.outputs.version }}-source.tar.zst
+      SHITATE_SOURCE_SHA256: ${{ github.workspace }}/../shitate-artifacts-${{ github.run_id }}-${{ github.run_attempt }}/shitate-${{ needs.gate.outputs.version }}-source.tar.zst.sha256
+      SHITATE_PROVENANCE: ${{ github.workspace }}/../shitate-artifacts-${{ github.run_id }}-${{ github.run_attempt }}/provenance.json
       SHITATE_NOTICES: ${{ github.workspace }}/THIRD_PARTY_NOTICES.md
       VERSION: ${{ needs.gate.outputs.version }}
     steps:
@@ -132,6 +132,13 @@ jobs:
 
       - name: Install Nix
         uses: cachix/install-nix-action@b4b293eae0b79aac8a161bb32925a5508c9cca93 # v31
+
+      - name: Initialize empty release artifact directory
+        run: |
+          set -euo pipefail
+          expected="$GITHUB_WORKSPACE/../shitate-artifacts-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          [[ "$SHITATE_ARTIFACT_DIR" == "$expected" ]]
+          mkdir "$SHITATE_ARTIFACT_DIR"
 
       - name: Build release and verify corresponding source
         run: |

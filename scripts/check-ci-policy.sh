@@ -16,7 +16,10 @@ if ! command -v yq >/dev/null 2>&1; then
   printf 'yq is missing; enter the pinned environment with nix develop.\n' >&2
   exit 1
 fi
-
+if ! command -v actionlint >/dev/null 2>&1; then
+  printf 'actionlint is missing; enter the pinned environment with nix develop.\n' >&2
+  exit 1
+fi
 uses_lines=$(grep -ERh '^[[:space:]]*uses:' "$workflow_directory")
 if [[ -z "$uses_lines" ]]; then
   printf 'no GitHub Action uses entries found\n' >&2
@@ -36,9 +39,16 @@ if grep -ERn 'pull_request_target|permissions:[[:space:]]*write-all|@[vV][0-9]+(
   exit 1
 fi
 
+shopt -s nullglob
 workflow_files=("$workflow_directory"/*.yml "$workflow_directory"/*.yaml)
+shopt -u nullglob
+if [[ ${#workflow_files[@]} -eq 0 ]]; then
+  printf 'no GitHub Actions workflow files found\n' >&2
+  exit 1
+fi
+actionlint "${workflow_files[@]}"
+
 for workflow in "${workflow_files[@]}"; do
-  [[ -f "$workflow" ]] || continue
   if ! yq -o=json '.permissions' "$workflow" |
     jq -e '. == {"contents":"read"}' >/dev/null; then
     printf 'workflow-level permissions must be exactly contents: read: %s\n' "$workflow" >&2
