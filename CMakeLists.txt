@@ -173,8 +173,14 @@ set_source_files_properties("${SHITATE_APP_ICON}" PROPERTIES
   MACOSX_PACKAGE_LOCATION "Resources"
   XCODE_EXPLICIT_FILE_TYPE "folder.iconcomposer.icon")
 
+set(SHITATE_ASSET_CATALOG "${CMAKE_SOURCE_DIR}/resources/Assets.xcassets")
+set_source_files_properties("${SHITATE_ASSET_CATALOG}" PROPERTIES
+  MACOSX_PACKAGE_LOCATION "Resources"
+  XCODE_EXPLICIT_FILE_TYPE "folder.assetcatalog")
+
 add_executable(Shitate MACOSX_BUNDLE
   "${SHITATE_APP_ICON}"
+  "${SHITATE_ASSET_CATALOG}"
   Sources/App/AppDelegate.swift
   Sources/App/AppModel+Persistence.swift
   Sources/App/AppModel+Plugins.swift

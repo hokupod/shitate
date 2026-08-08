@@ -19,9 +19,14 @@ struct ShitateApp: App {
                 }
         }
 
-        MenuBarExtra("Shi-tate", systemImage: model.statusSymbol) {
+        MenuBarExtra {
             MenuBarView()
                 .environment(model)
+        } label: {
+            Image("ShitateMenuBarTemplate")
+                .renderingMode(.template)
+                .accessibilityLabel("Shi-tate: \(model.statusTitle)")
+                .help(model.statusTitle)
         }
 
         Settings {
