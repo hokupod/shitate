@@ -4,6 +4,10 @@
 
 set -euo pipefail
 
+repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=scripts/lib/version.sh
+source "$repository_root/scripts/lib/version.sh"
+
 if [[ $# -lt 5 || $# -gt 6 ]]; then
   printf '%s\n' \
     "usage: $0 <tag> <expected-commit> <expected-tagger-email> <ref-json> <tag-json> [expected-tag-object]" >&2
@@ -16,7 +20,9 @@ expected_tagger_email=$3
 ref_json=$4
 tag_json=$5
 expected_tag_object=${6:-}
-if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ||
+if [[ "$tag" != v* ]] ||
+  ! shitate_require_publishable_version "${tag#v}" ||
+  [[
   ! "$expected_commit" =~ ^[0-9a-f]{40}$ ||
   ! "$expected_tagger_email" =~ ^[^[:space:]@]+@[^[:space:]@]+$ ||
   ( -n "$expected_tag_object" && ! "$expected_tag_object" =~ ^[0-9a-f]{40}$ ) ]]; then

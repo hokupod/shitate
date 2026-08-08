@@ -7,7 +7,7 @@ import XCTest
 final class BridgeVersionTests: XCTestCase {
     func testBridgeReturnsDisplayVersion() {
         let bridge = STAudioEngineBridge()
-        XCTAssertEqual(bridge.displayVersion, "0.2.0-dev")
+        XCTAssertEqual(bridge.displayVersion, shitateExpectedDisplayVersion)
         XCTAssertNotNil(bridge.audioDevices())
         _ = bridge.defaultOutputDevice()
     }

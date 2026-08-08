@@ -5,6 +5,11 @@
 Shi-tate is pre-alpha. No released version is currently supported. Security
 fixes target the current development branch until a release policy is published.
 
+Development versions use `X.Y.Z-dev` and are never tagged or published.
+Publishable identities are exactly `X.Y.Z`, `X.Y.Z-alpha.N`, `X.Y.Z-beta.N`, or
+`X.Y.Z-rc.N`; the complete version, including its prerelease suffix, must match
+the signed tag, app metadata, artifact names, source metadata, and attestations.
+
 ## Reporting a vulnerability
 
 Please report a suspected vulnerability privately through GitHub's private
@@ -48,7 +53,12 @@ updates and deletion for `v*.*.*`, the protected `release` environment,
 `SHITATE_RELEASE_TAGGER_EMAIL`. The workflow accepts only a GitHub-verified
 annotated tag whose `valid` signature covers that tagger identity, records its
 tag-object SHA, and revalidates the same live object immediately before creating
-the draft release.
+the draft release. Before an immutable tag is created, a protected preflight at
+the exact reviewed main SHA must validate certificate import, Developer ID
+codesigning, certificate lifetime, and notary authentication without creating a
+tag, release, asset, or attestation. Every published asset is attested, and the
+release becomes immutable only after downloaded draft bytes and evidence have
+been independently revalidated.
 
 App Sandbox is disabled and Library Validation is disabled only for the app and
 scanner because user VST3 bundles are loaded as native code. Hardened Runtime

@@ -5,6 +5,10 @@
 
 #include <juce_core/juce_core.h>
 
+#ifndef SHITATE_EXPECTED_DISPLAY_VERSION
+#error "SHITATE_EXPECTED_DISPLAY_VERSION must be provided by CMake"
+#endif
+
 namespace {
 
 class CoreVersionTest final : public juce::UnitTest {
@@ -13,7 +17,7 @@ class CoreVersionTest final : public juce::UnitTest {
 
     void runTest() override {
         beginTest("returns the repository display version");
-        expect(shitate::ApplicationCore::displayVersion() == "0.2.0-dev");
+        expect(shitate::ApplicationCore::displayVersion() == SHITATE_EXPECTED_DISPLAY_VERSION);
     }
 };
 

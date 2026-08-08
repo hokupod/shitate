@@ -5,6 +5,7 @@
 set -euo pipefail
 
 scanner=${1:?scanner path is required}
+expected_version=${2:?expected version is required}
 
 if [[ ! -x "$scanner" ]]; then
   printf 'scanner is not executable: %s\n' "$scanner" >&2
@@ -12,7 +13,7 @@ if [[ ! -x "$scanner" ]]; then
 fi
 
 actual_version=$("$scanner" --version)
-if [[ "$actual_version" != "ShitatePluginScanner 0.2.0-dev" ]]; then
+if [[ "$actual_version" != "ShitatePluginScanner $expected_version" ]]; then
   printf 'unexpected scanner version: %s\n' "$actual_version" >&2
   exit 1
 fi

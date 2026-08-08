@@ -48,11 +48,23 @@ parent_commit=$(git -C "$test_root" rev-parse HEAD)
   ./scripts/check-docs.sh
   expected_commit=$(jq -r '.commit' SOURCE-METADATA.json)
   expected_version=$(jq -r '.version' SOURCE-METADATA.json)
+  expected_version_core=$(jq -r '.versionCore' SOURCE-METADATA.json)
+  expected_bundle_version=$(jq -r '.bundleVersion' SOURCE-METADATA.json)
   [[ "$expected_commit" != "$parent_commit" ]]
   info_plist=build/dev/Debug/Shi-tate.app/Contents/Info.plist
+  scanner_plist=build/dev/resources/Scanner-Info.plist
   [[ $(plutil -extract ShitateCommit raw -o - "$info_plist") == "$expected_commit" ]]
+  [[ $(plutil -extract ShitateVersion raw -o - "$info_plist") == "$expected_version" ]]
   [[ $(plutil -extract CFBundleShortVersionString raw -o - "$info_plist") == \
-    "$expected_version" ]]
+    "$expected_version_core" ]]
+  [[ $(plutil -extract CFBundleVersion raw -o - "$info_plist") == \
+    "$expected_bundle_version" ]]
+  [[ $(plutil -extract ShitateCommit raw -o - "$scanner_plist") == "$expected_commit" ]]
+  [[ $(plutil -extract ShitateVersion raw -o - "$scanner_plist") == "$expected_version" ]]
+  [[ $(plutil -extract CFBundleShortVersionString raw -o - "$scanner_plist") == \
+    "$expected_version_core" ]]
+  [[ $(plutil -extract CFBundleVersion raw -o - "$scanner_plist") == \
+    "$expected_bundle_version" ]]
 )
 
 printf 'fresh extracted corresponding source built and tested without dependency download\n'

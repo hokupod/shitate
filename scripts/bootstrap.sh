@@ -6,6 +6,9 @@ set -euo pipefail
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 expected_juce_sha=f8f8864172464b9adf9eba6101e1f784838d1597
+# shellcheck source=scripts/lib/version.sh
+source "$repository_root/scripts/lib/version.sh"
+shitate_read_version_contract "$repository_root"
 
 if [[ -z ${DEVELOPER_DIR:-} ]]; then
   xcode_candidates=(
@@ -68,11 +71,19 @@ else
     exit 1
   fi
   if ! jq -e '
-    .schemaVersion == 1 and
+    .schemaVersion == 2 and
     (.version | type == "string") and
+    (.versionCore | type == "string") and
+    (.bundleVersion | type == "string") and
     (.commit | test("^[0-9a-f]{40}$")) and
     (.juceCommit | test("^[0-9a-f]{40}$"))
-  ' "$source_metadata" >/dev/null; then
+  ' "$source_metadata" >/dev/null ||
+    ! jq -e \
+      --arg version "$SHITATE_VERSION" \
+      --arg core "$SHITATE_VERSION_CORE" \
+      --arg bundle "$SHITATE_BUNDLE_VERSION" \
+      '.version == $version and .versionCore == $core and .bundleVersion == $bundle' \
+      "$source_metadata" >/dev/null; then
     printf 'Corresponding-source metadata is invalid.\n' >&2
     exit 1
   fi

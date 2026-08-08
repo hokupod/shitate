@@ -7,6 +7,9 @@ set -euo pipefail
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=scripts/lib/security-policy.sh
 source "$repository_root/scripts/lib/security-policy.sh"
+# shellcheck source=scripts/lib/version.sh
+source "$repository_root/scripts/lib/version.sh"
+shitate_read_version_contract "$repository_root"
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
   printf 'usage: %s <Shi-tate.app> [--allow-adhoc]\n' "$0" >&2
@@ -20,6 +23,9 @@ if [[ ${2:-} == --allow-adhoc ]]; then
 elif [[ $# -eq 2 ]]; then
   printf 'unknown verification mode: %s\n' "$2" >&2
   exit 2
+fi
+if [[ "$allow_adhoc" == false ]]; then
+  shitate_require_publishable_version "$SHITATE_VERSION"
 fi
 
 app_bundle=$(perl -MCwd=abs_path -le 'print abs_path($ARGV[0]) // q{}' "$app_bundle")
@@ -58,7 +64,11 @@ for executable in "$app_executable" "$helper_executable"; do
     exit 1
   fi
 done
-if [[ $(plutil -extract CFBundleShortVersionString raw -o - "$info_plist") != 0.2.0 ||
+if [[ $(plutil -extract ShitateVersion raw -o - "$info_plist") != "$SHITATE_VERSION" ||
+  $(plutil -extract CFBundleShortVersionString raw -o - "$info_plist") != \
+    "$SHITATE_VERSION_CORE" ||
+  $(plutil -extract CFBundleVersion raw -o - "$info_plist") != \
+    "$SHITATE_BUNDLE_VERSION" ||
   ! $(plutil -extract ShitateCommit raw -o - "$info_plist") =~ ^[0-9a-f]{40}$ ]]; then
   printf 'release version or commit metadata is invalid\n' >&2
   exit 1

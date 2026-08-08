@@ -5,16 +5,24 @@
 set -euo pipefail
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=scripts/lib/version.sh
+source "$repository_root/scripts/lib/version.sh"
+shitate_read_version_contract "$repository_root"
 tar_bin=$(type -P tar || true)
 if [[ -z "$tar_bin" ]] ||
   ! "$tar_bin" --version 2>/dev/null | grep -Fq 'tar (GNU tar)'; then
   printf 'GNU tar is required; run this script through nix develop\n' >&2
   exit 127
 fi
-version=${1:-}
-if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  printf 'usage: %s <X.Y.Z>\n' "$0" >&2
+if [[ $# -ne 1 ]]; then
+  printf 'usage: %s <version-from-VERSION>\n' "$0" >&2
   exit 2
+fi
+version=$1
+if [[ "$version" != "$SHITATE_VERSION" ]]; then
+  printf 'source version must exactly match VERSION: expected %s; got %s\n' \
+    "$SHITATE_VERSION" "$version" >&2
+  exit 1
 fi
 if [[ -n $(git -C "$repository_root" status --short --untracked-files=no) &&
   ${SHITATE_ALLOW_DIRTY_SOURCE:-} != YES ]]; then
@@ -62,9 +70,11 @@ git -C "$repository_root/external/JUCE" ls-files -z |
 commit=$(git -C "$repository_root" rev-parse HEAD)
 jq -n \
   --arg version "$version" \
+  --arg version_core "$SHITATE_VERSION_CORE" \
+  --arg bundle_version "$SHITATE_BUNDLE_VERSION" \
   --arg commit "$commit" \
   --arg juce "$actual_juce_sha" \
-  '{schemaVersion:1,version:$version,commit:$commit,juceCommit:$juce}' \
+  '{schemaVersion:2,version:$version,versionCore:$version_core,bundleVersion:$bundle_version,commit:$commit,juceCommit:$juce}' \
   >"$staging/SOURCE-METADATA.json"
 
 source_date_epoch=${SOURCE_DATE_EPOCH:-$(git -C "$repository_root" show -s --format=%ct HEAD)}

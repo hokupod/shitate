@@ -86,7 +86,9 @@ jobs:
         env:
           SHITATE_ARTIFACT_DIR: ${{ runner.temp }}/shitate-ci-artifacts
         run: |
-          version=$(sed 's/-dev$//' VERSION)
+          source scripts/lib/version.sh
+          shitate_read_version_contract "$GITHUB_WORKSPACE"
+          version=$SHITATE_VERSION
           nix develop -c ./scripts/package.sh release
           nix develop -c ./scripts/make-source-archive.sh "$version"
           nix develop -c ./scripts/verify-source-archive.sh \

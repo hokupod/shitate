@@ -5,6 +5,9 @@
 set -euo pipefail
 
 app_bundle=${1:?app bundle path is required}
+expected_version=${2:?expected full version is required}
+expected_version_core=${3:?expected version core is required}
+expected_bundle_version=${4:?expected bundle version is required}
 app_executable="$app_bundle/Contents/MacOS/Shi-tate"
 helper="$app_bundle/Contents/Helpers/ShitatePluginScanner"
 resources="$app_bundle/Contents/Resources"
@@ -72,6 +75,18 @@ if [[ "$bundle_executable" != "Shi-tate" ]]; then
   exit 1
 fi
 
+info_plist="$app_bundle/Contents/Info.plist"
+actual_version=$(plutil -extract ShitateVersion raw -o - "$info_plist")
+actual_version_core=$(plutil -extract CFBundleShortVersionString raw -o - "$info_plist")
+actual_bundle_version=$(plutil -extract CFBundleVersion raw -o - "$info_plist")
+if [[ "$actual_version" != "$expected_version" ||
+  "$actual_version_core" != "$expected_version_core" ||
+  "$actual_bundle_version" != "$expected_bundle_version" ]]; then
+  printf 'unexpected bundle version mapping: full=%s core=%s bundle=%s\n' \
+    "$actual_version" "$actual_version_core" "$actual_bundle_version" >&2
+  exit 1
+fi
+
 bundle_icon_file=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' \
   "$app_bundle/Contents/Info.plist")
 bundle_icon_name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' \
@@ -87,6 +102,29 @@ cleanup() {
   rm -rf -- "$temporary_directory"
 }
 trap cleanup EXIT
+
+scanner_info_plist="$temporary_directory/Scanner-Info.plist"
+if ! /usr/bin/otool -s __TEXT __info_plist -v "$helper" |
+  /usr/bin/sed -e '1,2d' >"$scanner_info_plist"; then
+  printf 'scanner executable has no readable embedded Info.plist\n' >&2
+  exit 1
+fi
+if ! plutil -lint "$scanner_info_plist" >/dev/null; then
+  printf 'scanner executable contains an invalid embedded Info.plist\n' >&2
+  exit 1
+fi
+scanner_version=$(plutil -extract ShitateVersion raw -o - "$scanner_info_plist")
+scanner_version_core=$(plutil -extract CFBundleShortVersionString raw -o - \
+  "$scanner_info_plist")
+scanner_bundle_version=$(plutil -extract CFBundleVersion raw -o - \
+  "$scanner_info_plist")
+if [[ "$scanner_version" != "$expected_version" ||
+  "$scanner_version_core" != "$expected_version_core" ||
+  "$scanner_bundle_version" != "$expected_bundle_version" ]]; then
+  printf 'unexpected scanner version mapping: full=%s core=%s bundle=%s\n' \
+    "$scanner_version" "$scanner_version_core" "$scanner_bundle_version" >&2
+  exit 1
+fi
 
 iconset="$temporary_directory/Shitate.iconset"
 /usr/bin/iconutil --convert iconset --output "$iconset" \

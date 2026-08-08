@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Hokuto Takemiya
+
+name: Release Credential Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact reviewed main commit to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+jobs:
+  gate:
+    runs-on: macos-26
+    outputs:
+      expected_sha: ${{ steps.gate.outputs.expected_sha }}
+    steps:
+      - name: Bind preflight to exact main SHA before credentials
+        id: gate
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_SHA" == "$EXPECTED_SHA" ]]
+          printf 'expected_sha=%s\n' "$EXPECTED_SHA" >>"$GITHUB_OUTPUT"
+
+  credential:
+    needs: gate
+    environment: release
+    runs-on: macos-26
+    steps:
+      - name: Check out the exact reviewed commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Revalidate identity before materializing credentials
+        env:
+          EXPECTED_SHA: ${{ needs.gate.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$GITHUB_SHA" == "$EXPECTED_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]]
+
+      - name: Validate Apple credential usability without release mutation
+        env:
+          SHITATE_CERTIFICATE_P12_BASE64: ${{ secrets.SHITATE_CERTIFICATE_P12_BASE64 }}
+          SHITATE_CERTIFICATE_PASSWORD: ${{ secrets.SHITATE_CERTIFICATE_PASSWORD }}
+          SHITATE_KEYCHAIN_PASSWORD: ${{ secrets.SHITATE_KEYCHAIN_PASSWORD }}
+          SHITATE_NOTARY_ISSUER_ID: ${{ secrets.SHITATE_NOTARY_ISSUER_ID }}
+          SHITATE_NOTARY_KEY_BASE64: ${{ secrets.SHITATE_NOTARY_KEY_BASE64 }}
+          SHITATE_NOTARY_KEY_ID: ${{ secrets.SHITATE_NOTARY_KEY_ID }}
+          SHITATE_SIGNING_IDENTITY: ${{ vars.SHITATE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" == "${{ needs.gate.outputs.expected_sha }}" ]]
+          source scripts/lib/apple-credentials.sh
+          credential_root="$RUNNER_TEMP/shitate-credential-preflight"
+          trap shitate_cleanup_apple_credentials EXIT
+          shitate_prepare_apple_credentials "$credential_root"
+          shitate_validate_apple_credentials "$credential_root"

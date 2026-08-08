@@ -12,8 +12,14 @@
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>@PROJECT_VERSION@</string>
+  <string>@SHITATE_VERSION_CORE@</string>
+  <key>CFBundleVersion</key>
+  <string>@SHITATE_BUNDLE_VERSION@</string>
   <key>LSMinimumSystemVersion</key>
   <string>14.0</string>
+  <key>ShitateCommit</key>
+  <string>@SHITATE_GIT_COMMIT@</string>
+  <key>ShitateVersion</key>
+  <string>@SHITATE_DISPLAY_VERSION@</string>
 </dict>
 </plist>

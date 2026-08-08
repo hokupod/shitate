@@ -127,16 +127,22 @@ There is no signed release yet. When one is published, download its DMG and
 adjacent checksum from the same approved release, then verify before opening it:
 
 ```bash
-shasum -a 256 -c Shi-tate_0.2.0_arm64.dmg.sha256
+version='<exact release version, including any alpha/beta/rc suffix>'
+shasum -a 256 -c "Shi-tate_${version}_arm64.dmg.sha256"
+gh attestation verify "Shi-tate_${version}_arm64.dmg" \
+  --repo hokupod/shitate \
+  --signer-workflow hokupod/shitate/.github/workflows/release.yml
 spctl --assess --type open --context context:primary-signature --verbose=4 \
-  Shi-tate_0.2.0_arm64.dmg
+  "Shi-tate_${version}_arm64.dmg"
 ```
 
 After dragging the app to Applications, verify it again with
 `spctl --assess --type execute --verbose=4 /Applications/Shi-tate.app`. Do not
-bypass Gatekeeper if either assessment fails. The release also provides a
-recursive `shitate-0.2.0-source.tar.zst` archive and SHA-256; GitHub's automatic
-source archive is not the corresponding source because it omits JUCE contents.
+bypass Gatekeeper if either assessment fails. The checksum is auxiliary;
+attestation verification authenticates the workflow origin. The release also
+provides `shitate-${version}-source.tar.zst` and its SHA-256, preserving the
+complete prerelease suffix. GitHub's automatic source archive is not the
+corresponding source because it omits JUCE contents.
 
 ## Privacy and security
 

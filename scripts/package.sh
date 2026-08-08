@@ -5,17 +5,25 @@
 set -euo pipefail
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=scripts/lib/version.sh
+source "$repository_root/scripts/lib/version.sh"
+shitate_read_version_contract "$repository_root"
 preset=${1:-release}
 if [[ "$preset" != release ]]; then
   printf 'usage: %s release\n' "$0" >&2
   exit 2
 fi
 
-version=$(sed 's/-dev$//' "$repository_root/VERSION")
-if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  printf 'invalid release version: %s\n' "$version" >&2
-  exit 1
-fi
+version=$SHITATE_VERSION
+release_mode=${SHITATE_RELEASE_MODE:-adhoc}
+case $release_mode in
+  adhoc) ;;
+  developer-id) shitate_require_publishable_version "$version" ;;
+  *)
+    printf 'SHITATE_RELEASE_MODE must be adhoc or developer-id\n' >&2
+    exit 2
+    ;;
+esac
 app_bundle="$repository_root/build/release/Release/Shi-tate.app"
 artifact_directory=${SHITATE_ARTIFACT_DIR:-"$repository_root/build/artifacts"}
 dmg_name="Shi-tate_${version}_arm64.dmg"
@@ -33,11 +41,8 @@ for destination in "${destinations[@]}"; do
 done
 
 verification_arguments=("$app_bundle")
-if [[ ${SHITATE_RELEASE_MODE:-adhoc} == adhoc ]]; then
+if [[ "$release_mode" == adhoc ]]; then
   verification_arguments+=(--allow-adhoc)
-elif [[ ${SHITATE_RELEASE_MODE:-} != developer-id ]]; then
-  printf 'SHITATE_RELEASE_MODE must be adhoc or developer-id\n' >&2
-  exit 2
 fi
 "$repository_root/scripts/verify-release.sh" "${verification_arguments[@]}"
 

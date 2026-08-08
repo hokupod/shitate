@@ -122,15 +122,20 @@ hardware・製品導線ごとの検証済み／未検証evidenceは
 隣接するchecksumを取得し、開く前に検証してください。
 
 ```bash
-shasum -a 256 -c Shi-tate_0.2.0_arm64.dmg.sha256
+version='<alpha/beta/rc suffixを含む正確なrelease version>'
+shasum -a 256 -c "Shi-tate_${version}_arm64.dmg.sha256"
+gh attestation verify "Shi-tate_${version}_arm64.dmg" \
+  --repo hokupod/shitate \
+  --signer-workflow hokupod/shitate/.github/workflows/release.yml
 spctl --assess --type open --context context:primary-signature --verbose=4 \
-  Shi-tate_0.2.0_arm64.dmg
+  "Shi-tate_${version}_arm64.dmg"
 ```
 
 Applicationsへdrag後、
 `spctl --assess --type execute --verbose=4 /Applications/Shi-tate.app`でも
 再検証します。いずれかが失敗した場合はGatekeeperを迂回しないでください。
-releaseにはrecursive `shitate-0.2.0-source.tar.zst`とSHA-256も含まれます。
+checksumは補助であり、workflow originはattestationで認証します。releaseにはsuffixを
+保持したrecursive `shitate-${version}-source.tar.zst`とSHA-256も含まれます。
 GitHubの自動source archiveはJUCE内容を欠くため、対応sourceではありません。
 
 ## プライバシーとセキュリティ

@@ -16,9 +16,10 @@ test_root=$(mktemp -d "${TMPDIR:-/tmp}/shitate-workflow-policy.XXXXXX")
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
 
 reset_fixture() {
-  rm -rf "$test_root/.github"
-  mkdir -p "$test_root/.github"
+  rm -rf "$test_root/.github" "$test_root/scripts"
+  mkdir -p "$test_root/.github" "$test_root/scripts/lib"
   cp -R "$repository_root/.github/workflows" "$test_root/.github/workflows"
+  cp "$repository_root/scripts/lib/apple-credentials.sh" "$test_root/scripts/lib/"
 }
 
 expect_rejection() {
@@ -39,16 +40,30 @@ expect_tag_rejection() {
   fi
 }
 
+expect_tag_value_rejection() {
+  local label=$1
+  local invalid_tag=$2
+  if "$tag_policy" "$invalid_tag" "$expected_commit" \
+    "$expected_tagger_email" "$test_root/tag-ref.json" \
+    "$test_root/tag-object.json" "$expected_tag_object" >/dev/null 2>&1; then
+    printf 'release tag value passed unexpectedly: %s\n' "$label" >&2
+    exit 1
+  fi
+}
+
 write_valid_tag_fixture() {
+  local fixture_tag=${1:-v1.2.3}
   jq -n \
+    --arg tag "$fixture_tag" \
     --arg tag_object_sha "$tag_object_sha" \
-    '{ref:"refs/tags/v1.2.3",object:{type:"tag",sha:$tag_object_sha}}' \
+    '{ref:("refs/tags/" + $tag),object:{type:"tag",sha:$tag_object_sha}}' \
     >"$test_root/tag-ref.json"
   jq -n \
+    --arg tag "$fixture_tag" \
     --arg tag_object_sha "$tag_object_sha" \
     --arg expected_commit "$expected_commit" \
     --arg expected_tagger_email "$expected_tagger_email" \
-    '{sha:$tag_object_sha,tag:"v1.2.3",tagger:{email:$expected_tagger_email},object:{type:"commit",sha:$expected_commit},verification:{verified:true,reason:"valid",signature:"signed",payload:"payload"}}' \
+    '{sha:$tag_object_sha,tag:$tag,tagger:{email:$expected_tagger_email},object:{type:"commit",sha:$expected_commit},verification:{verified:true,reason:"valid",signature:"signed",payload:"payload"}}' \
     >"$test_root/tag-object.json"
 }
 
@@ -62,6 +77,17 @@ write_valid_tag_fixture
 "$tag_policy" "v1.2.3" "$expected_commit" \
   "$expected_tagger_email" "$test_root/tag-ref.json" \
   "$test_root/tag-object.json" "$expected_tag_object" >/dev/null
+
+write_valid_tag_fixture v1.2.3-alpha.1
+"$tag_policy" "v1.2.3-alpha.1" "$expected_commit" \
+  "$expected_tagger_email" "$test_root/tag-ref.json" \
+  "$test_root/tag-object.json" "$expected_tag_object" >/dev/null
+for invalid_tag in \
+  v1.2.3-dev \
+  v1.2.3-alpha.01 \
+  v1.2.3+build.1; do
+  expect_tag_value_rejection malformed-publishable-tag "$invalid_tag"
+done
 
 write_valid_tag_fixture
 jq '.object.type = "commit"' "$test_root/tag-ref.json" \
@@ -125,6 +151,38 @@ reset_fixture
 perl -0pi -e 's/environment: release/environment: staging/' \
   "$test_root/.github/workflows/release.yml"
 expect_rejection unprotected-release
+
+reset_fixture
+perl -0pi -e 's/environment: release/environment: staging/' \
+  "$test_root/.github/workflows/release-preflight.yml"
+expect_rejection unprotected-preflight
+
+reset_fixture
+yq -i '.on.push = {"branches":["main"]}' \
+  "$test_root/.github/workflows/release-preflight.yml"
+expect_rejection preflight-push-trigger
+
+reset_fixture
+yq -i '.on.push.tags = ["v*"]' \
+  "$test_root/.github/workflows/release.yml"
+expect_rejection broad-release-tag-trigger
+
+reset_fixture
+yq -i '.jobs.credential.steps = [.jobs.credential.steps[] |
+  select(.name != "Revalidate identity before materializing credentials")]' \
+  "$test_root/.github/workflows/release-preflight.yml"
+expect_rejection missing-preflight-revalidation
+
+reset_fixture
+perl -pi -e 's/^  export SHITATE_NOTARY_KEY_PATH=/  SHITATE_NOTARY_KEY_PATH=/' \
+  "$test_root/scripts/lib/apple-credentials.sh"
+expect_rejection unexported-notary-key-path
+
+reset_fixture
+perl -0pi -e \
+  's/            \$\{\{ env\.SHITATE_DMG_SHA256 \}\}\n//' \
+  "$test_root/.github/workflows/release.yml"
+expect_rejection unattested-release-asset
 
 reset_fixture
 perl -0pi -e 's/      - test\n/      - package\n/' \

@@ -68,16 +68,16 @@ for workflow in "${workflow_files[@]}"; do
     select(.value | tostring | contains("${{ secrets.")) |
     .key
   ')
-  if [[ -n "$secret_jobs" && $(basename "$workflow") != release.yml ]]; then
-    printf 'non-release workflow references secrets: %s\n' "$workflow" >&2
-    exit 1
-  fi
+  workflow_name=$(basename "$workflow")
   while IFS= read -r secret_job; do
-    [[ -z "$secret_job" || "$secret_job" == release ]] || {
-      printf 'secrets are only allowed in the protected release job: %s:%s\n' \
-        "$workflow" "$secret_job" >&2
-      exit 1
-    }
+    [[ -z "$secret_job" ]] && continue
+    if [[ "$workflow_name:$secret_job" == release.yml:release ||
+      "$workflow_name:$secret_job" == release-preflight.yml:credential ]]; then
+      continue
+    fi
+    printf 'secrets are only allowed in protected release jobs: %s:%s\n' \
+      "$workflow" "$secret_job" >&2
+    exit 1
   done <<<"$secret_jobs"
 done
 
@@ -86,11 +86,12 @@ if [[ ! -f "$release_workflow" ]]; then
   printf 'release workflow is missing\n' >&2
   exit 1
 fi
-if ! yq -e '
+if ! yq -o=json '.' "$release_workflow" | jq -e '
   (.on | has("push")) and
   (.on | has("workflow_dispatch")) and
+  (.on.push.tags == ["v*.*.*"]) and
   .jobs.release.environment == "release"
-' "$release_workflow" >/dev/null; then
+' >/dev/null; then
   printf 'release workflow must use tag/manual triggers and protected release environment\n' >&2
   exit 1
 fi
@@ -102,6 +103,8 @@ if ! yq -o=json '.jobs.release.needs' "$release_workflow" |
 fi
 for required_text in \
   'scripts/validate-release-tag.sh' \
+  'shitate_require_publishable_version' \
+  'shitate_read_version_contract' \
   'SHITATE_RELEASE_TAGGER_EMAIL' \
   'SHITATE_IMMUTABLE_RELEASE_TAGS' \
   "[[ \"\$SHITATE_IMMUTABLE_RELEASE_TAGS\" == YES ]]" \
@@ -115,6 +118,75 @@ for required_text in \
   'scripts/verify-source-archive.sh'; do
   if ! grep -Fq -- "$required_text" "$release_workflow"; then
     printf 'release workflow gate is missing: %s\n' "$required_text" >&2
+    exit 1
+  fi
+done
+
+credential_library="$repository_root/scripts/lib/apple-credentials.sh"
+if [[ ! -f "$credential_library" ]] ||
+  ! grep -Eq '^[[:space:]]*export SHITATE_NOTARY_KEY_PATH=' \
+    "$credential_library"; then
+  printf 'notary key path must be exported for the notarization subprocess\n' >&2
+  exit 1
+fi
+
+preflight_workflow="$workflow_directory/release-preflight.yml"
+if [[ ! -f "$preflight_workflow" ]] ||
+  ! yq -o=json '.' "$preflight_workflow" | jq -e '
+    (.on | keys == ["workflow_dispatch"]) and
+    (.permissions == {"contents":"read"}) and
+    (.jobs.gate.environment == null) and
+    (.jobs.gate | tostring | contains("${{ secrets.") | not) and
+    (.jobs.credential.needs == "gate") and
+    (.jobs.credential.environment == "release") and
+    ([.jobs.credential.steps[].name] as $names |
+      ($names | index("Revalidate identity before materializing credentials")) as $revalidate |
+      ($names | index("Validate Apple credential usability without release mutation")) as $validate |
+      ($revalidate != null) and ($validate != null) and ($revalidate < $validate))
+  ' >/dev/null; then
+  printf 'release credential preflight structure is invalid\n' >&2
+  exit 1
+fi
+for required_text in \
+  "[[ \"\$GITHUB_REF\" == refs/heads/main ]]" \
+  "[[ \"\$GITHUB_SHA\" == \"\$EXPECTED_SHA\" ]]" \
+  'scripts/lib/apple-credentials.sh'; do
+  if ! grep -Fq -- "$required_text" "$preflight_workflow"; then
+    printf 'release credential preflight gate is missing: %s\n' "$required_text" >&2
+    exit 1
+  fi
+done
+if grep -En -- 'gh[[:space:]]+release|upload-artifact|attest-build-provenance|contents:[[:space:]]*write' \
+  "$preflight_workflow"; then
+  printf 'release credential preflight may mutate release state\n' >&2
+  exit 1
+fi
+
+attestation_subjects=$(yq -o=json '.jobs.release.steps[] |
+  select(.name == "Attest release subjects") | .with."subject-path"' \
+  "$release_workflow" | jq -r '.')
+draft_release_step=$(yq -o=json '.jobs.release.steps[] |
+  select(.name == "Create draft release exactly once") | .run' \
+  "$release_workflow" | jq -r '.')
+asset_variables=(
+  SHITATE_DMG
+  SHITATE_DMG_SHA256
+  SHITATE_SOURCE_ARCHIVE
+  SHITATE_SOURCE_SHA256
+  SHITATE_PROVENANCE
+  SHITATE_NOTICES
+)
+if [[ $(grep -Ec '^\$\{\{ env\.SHITATE_[A-Z0-9_]+ \}\}$' \
+  <<<"$attestation_subjects") -ne ${#asset_variables[@]} ||
+  $(grep -Ec "^[[:space:]]*\"\\\$SHITATE_[A-Z0-9_]+\"" \
+    <<<"$draft_release_step") -ne ${#asset_variables[@]} ]]; then
+  printf 'release upload and attestation subject counts must both be six\n' >&2
+  exit 1
+fi
+for variable in "${asset_variables[@]}"; do
+  if ! grep -Fxq "\${{ env.$variable }}" <<<"$attestation_subjects" ||
+    ! grep -Fq "\$$variable" <<<"$draft_release_step"; then
+    printf 'release asset is not both uploaded and attested: %s\n' "$variable" >&2
     exit 1
   fi
 done

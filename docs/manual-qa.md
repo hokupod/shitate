@@ -223,6 +223,20 @@ private aggregate, exact subdevices, BlackHole clock, input drift compensation,
 No tag, GitHub Release, upload, signing credential, or notarization service was
 used during this record.
 
+## v0.2 SemVer contract record
+
+- Recorded: 2026-08-08 17:14 (JST)
+- Version contract: `VERSION=0.2.0-dev`, numeric core `0.2.0`, bundle version `1`.
+- Development build: Debug `ALL_BUILD` succeeded.
+- Automated suite: 31 registered, 30 passed, 0 failed, 1 hardware opt-in skip.
+- Policy gates: format, ShellCheck, documentation, workflow, and security checks passed.
+- Release-shape build: local arm64 Release build succeeded with ad-hoc signing.
+- Local package: `Shi-tate_0.2.0-dev_arm64.dmg` and its adjacent SHA-256 were
+  created in a temporary directory.
+- Boundary: no Developer ID credential, notarization service, tag, remote CI,
+  attestation, or GitHub Release was used. Source-archive round-trip evidence is
+  recorded only after the reviewed implementation commit is archived cleanly.
+
 ## Reproduction command
 
 Run only on a Mac where microphone access has been explicitly granted. Prefer a

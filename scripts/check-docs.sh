@@ -5,17 +5,34 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd -- "${script_dir}/.." && pwd)"
+default_repo_root="$(cd -- "${script_dir}/.." && pwd)"
+version_only=false
+if [[ $# -eq 0 ]]; then
+  repo_root=$default_repo_root
+elif [[ $# -eq 2 && $1 == --version-only ]]; then
+  version_only=true
+  repo_root=$2
+else
+  printf 'usage: %s [--version-only <repository-root>]\n' "$0" >&2
+  exit 2
+fi
+# shellcheck source=scripts/lib/version.sh
+source "$default_repo_root/scripts/lib/version.sh"
 
 fail() {
   printf 'docs check failed: %s\n' "$1" >&2
   exit 1
 }
 
-required_files=(
+version_files=(
   README.md
   README.ja.md
   README.zh-CN.md
+  VERSION
+  BUNDLE_VERSION
+)
+required_files=(
+  "${version_files[@]}"
   docs/design.md
   docs/architecture.md
   docs/threat-model.md
@@ -26,15 +43,18 @@ required_files=(
   THIRD_PARTY_NOTICES.md
   SECURITY.md
   CONTRIBUTING.md
-  VERSION
 )
 
-for relative_path in "${required_files[@]}"; do
+files_to_check=("${required_files[@]}")
+if [[ "$version_only" == true ]]; then
+  files_to_check=("${version_files[@]}")
+fi
+for relative_path in "${files_to_check[@]}"; do
   [[ -f "${repo_root}/${relative_path}" ]] || fail "missing ${relative_path}"
 done
 
-version="$(tr -d '\r\n' < "${repo_root}/VERSION")"
-[[ "${version}" == "0.2.0-dev" ]] || fail "VERSION must be 0.2.0-dev"
+shitate_read_version_contract "$repo_root" || fail 'invalid version contract'
+version=$SHITATE_VERSION
 
 readmes=(README.md README.ja.md README.zh-CN.md)
 for readme in "${readmes[@]}"; do
@@ -42,7 +62,7 @@ for readme in "${readmes[@]}"; do
   grep -Fq '[English](README.md)' "${path}" || fail "${readme}: missing English link"
   grep -Fq '[日本語](README.ja.md)' "${path}" || fail "${readme}: missing Japanese link"
   grep -Fq '[简体中文](README.zh-CN.md)' "${path}" || fail "${readme}: missing Chinese link"
-  grep -Fq '0.2.0-dev' "${path}" || fail "${readme}: version mismatch"
+  grep -Fq "$version" "${path}" || fail "${readme}: version mismatch"
   grep -Fq 'f8f8864172464b9adf9eba6101e1f784838d1597' "${path}" || fail "${readme}: JUCE pin mismatch"
   grep -Fq 'AGPL-3.0-only' "${path}" || fail "${readme}: license mismatch"
   grep -Fq 'BlackHole 2ch' "${path}" || fail "${readme}: BlackHole requirement missing"
@@ -52,6 +72,12 @@ for readme in "${readmes[@]}"; do
   grep -Fq 'docs/threat-model.md' "${path}" || fail "${readme}: threat-model link missing"
   grep -Eiq 'pre-alpha|プレアルファ' "${path}" || fail "${readme}: pre-alpha status missing"
 done
+
+if [[ "$version_only" == true ]]; then
+  printf 'docs version check passed: version=%s, readmes=%d\n' \
+    "$version" "${#readmes[@]}"
+  exit 0
+fi
 
 [[ "$(grep -c '^## ' "${repo_root}/docs/design.md")" == "33" ]] ||
   fail 'design must contain sections 0 through 32'

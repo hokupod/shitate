@@ -4,13 +4,19 @@
 cmake_minimum_required(VERSION 3.31)
 
 set(CMAKE_OSX_SYSROOT "macosx" CACHE STRING "macOS SDK" FORCE)
-project(Shitate VERSION 0.2.0 LANGUAGES C CXX OBJC OBJCXX Swift)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+include(ShitateVersion)
+shitate_read_version_contract(
+  SHITATE_DISPLAY_VERSION
+  SHITATE_VERSION_CORE
+  SHITATE_VERSION_CHANNEL
+  SHITATE_VERSION_IS_PRERELEASE
+  SHITATE_BUNDLE_VERSION)
+project(Shitate VERSION "${SHITATE_VERSION_CORE}" LANGUAGES C CXX OBJC OBJCXX Swift)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(CTest)
 include(ShitateBundle)
 include(ShitateCompiler)
-include(ShitateVersion)
 
 if(NOT APPLE)
   message(FATAL_ERROR "Shi-tate v0.2 supports macOS only")
@@ -27,10 +33,9 @@ set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Supported architecture" FORCE)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version" FORCE)
 set(CMAKE_XCODE_GENERATE_SCHEME ON)
 
-shitate_read_display_version(SHITATE_DISPLAY_VERSION)
-if(NOT SHITATE_DISPLAY_VERSION STREQUAL "${PROJECT_VERSION}-dev")
+if(NOT PROJECT_VERSION STREQUAL SHITATE_VERSION_CORE)
   message(FATAL_ERROR
-    "VERSION (${SHITATE_DISPLAY_VERSION}) must match project version (${PROJECT_VERSION}-dev)")
+    "VERSION core (${SHITATE_VERSION_CORE}) must match project version (${PROJECT_VERSION})")
 endif()
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/SOURCE-METADATA.json")
@@ -38,10 +43,16 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/SOURCE-METADATA.json")
   string(JSON SHITATE_SOURCE_SCHEMA GET "${SHITATE_SOURCE_METADATA}" schemaVersion)
   string(JSON SHITATE_GIT_COMMIT GET "${SHITATE_SOURCE_METADATA}" commit)
   string(JSON SHITATE_SOURCE_VERSION GET "${SHITATE_SOURCE_METADATA}" version)
-  if(NOT SHITATE_SOURCE_SCHEMA EQUAL 1 OR
-     NOT SHITATE_SOURCE_VERSION STREQUAL PROJECT_VERSION)
+  string(JSON SHITATE_SOURCE_VERSION_CORE GET "${SHITATE_SOURCE_METADATA}" versionCore)
+  string(JSON SHITATE_SOURCE_BUNDLE_VERSION GET "${SHITATE_SOURCE_METADATA}" bundleVersion)
+  string(JSON SHITATE_SOURCE_JUCE_COMMIT GET "${SHITATE_SOURCE_METADATA}" juceCommit)
+  if(NOT SHITATE_SOURCE_SCHEMA EQUAL 2 OR
+     NOT SHITATE_SOURCE_VERSION STREQUAL SHITATE_DISPLAY_VERSION OR
+     NOT SHITATE_SOURCE_VERSION_CORE STREQUAL SHITATE_VERSION_CORE OR
+     NOT SHITATE_SOURCE_BUNDLE_VERSION STREQUAL SHITATE_BUNDLE_VERSION OR
+     NOT SHITATE_SOURCE_JUCE_COMMIT MATCHES "^[0-9a-f]{40}$")
     message(FATAL_ERROR
-      "Source archive metadata must use schema 1 and version ${PROJECT_VERSION}")
+      "Source archive metadata must use schema 2 and match VERSION/BUNDLE_VERSION")
   endif()
 else()
   execute_process(
@@ -167,6 +178,10 @@ set_target_properties(ShitateBridge PROPERTIES
 
 configure_file(resources/Info.plist.in resources/Info.plist @ONLY)
 configure_file(resources/Scanner-Info.plist.in resources/Scanner-Info.plist @ONLY)
+configure_file(
+  Tests/Swift/GeneratedVersion.swift.in
+  generated/GeneratedVersion.swift
+  @ONLY)
 
 set(SHITATE_APP_ICON "${CMAKE_SOURCE_DIR}/resources/Shitate.icon")
 set_source_files_properties("${SHITATE_APP_ICON}" PROPERTIES
@@ -352,7 +367,9 @@ if(BUILD_TESTING)
     ShitateCore
     juce::juce_core
     juce::juce_gui_basics)
-  target_compile_definitions(ShitateCppTests PRIVATE JUCE_UNIT_TESTS=1)
+  target_compile_definitions(ShitateCppTests PRIVATE
+    JUCE_UNIT_TESTS=1
+    SHITATE_EXPECTED_DISPLAY_VERSION="${SHITATE_DISPLAY_VERSION}")
   shitate_apply_juce_definitions(ShitateCppTests)
   shitate_enable_warnings(ShitateCppTests)
 
@@ -447,6 +464,7 @@ if(BUILD_TESTING)
     Tests/Swift/AtomicFileWriterTests.swift
     Tests/Swift/AudioEnvironmentTests.swift
     Tests/Swift/BridgeVersionTests.swift
+    "${CMAKE_BINARY_DIR}/generated/GeneratedVersion.swift"
     Tests/Swift/DiagnosticServiceTests.swift
     Tests/Swift/MicrophonePermissionTests.swift
     Tests/Swift/PersistenceStoreTests.swift
@@ -544,12 +562,16 @@ if(BUILD_TESTING)
 
   add_test(NAME ScannerArgumentsTest
     COMMAND "${CMAKE_SOURCE_DIR}/Tests/Integration/ScannerArgumentsTest.sh"
-      "$<TARGET_FILE:ShitatePluginScanner>")
+      "$<TARGET_FILE:ShitatePluginScanner>"
+      "${SHITATE_DISPLAY_VERSION}")
   set_tests_properties(ScannerArgumentsTest PROPERTIES LABELS "integration;helper")
 
   add_test(NAME BundleLayoutTest
     COMMAND "${CMAKE_SOURCE_DIR}/Tests/Integration/BundleLayoutTest.sh"
-      "$<TARGET_BUNDLE_DIR:Shitate>")
+      "$<TARGET_BUNDLE_DIR:Shitate>"
+      "${SHITATE_DISPLAY_VERSION}"
+      "${SHITATE_VERSION_CORE}"
+      "${SHITATE_BUNDLE_VERSION}")
   set_tests_properties(BundleLayoutTest PROPERTIES
     DEPENDS ScannerArgumentsTest
     LABELS "integration;bundle")
@@ -582,4 +604,16 @@ if(BUILD_TESTING)
   set_tests_properties(InvalidVersionTest PROPERTIES
     LABELS "unit;cmake"
     WILL_FAIL TRUE)
+
+  add_test(NAME VersionPolicyTest
+    COMMAND "${CMAKE_SOURCE_DIR}/Tests/Integration/VersionPolicyTest.sh"
+      "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(VersionPolicyTest PROPERTIES
+    LABELS "unit;cmake;release-policy")
+
+  add_test(NAME DocsVersionPolicyTest
+    COMMAND "${CMAKE_SOURCE_DIR}/Tests/Integration/DocsVersionPolicyTest.sh"
+      "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(DocsVersionPolicyTest PROPERTIES
+    LABELS "integration;documentation;release-policy")
 endif()

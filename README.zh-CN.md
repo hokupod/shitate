@@ -117,15 +117,20 @@ macOS物理主输出。它只支持Automatic routing、48 kHz、双方共有的
 并在打开前执行验证：
 
 ```bash
-shasum -a 256 -c Shi-tate_0.2.0_arm64.dmg.sha256
+version='<包含alpha/beta/rc suffix的准确release version>'
+shasum -a 256 -c "Shi-tate_${version}_arm64.dmg.sha256"
+gh attestation verify "Shi-tate_${version}_arm64.dmg" \
+  --repo hokupod/shitate \
+  --signer-workflow hokupod/shitate/.github/workflows/release.yml
 spctl --assess --type open --context context:primary-signature --verbose=4 \
-  Shi-tate_0.2.0_arm64.dmg
+  "Shi-tate_${version}_arm64.dmg"
 ```
 
 把应用拖入Applications后，再执行
 `spctl --assess --type execute --verbose=4 /Applications/Shi-tate.app`。
-如果任一检查失败，请勿绕过Gatekeeper。release还会提供recursive
-`shitate-0.2.0-source.tar.zst`及SHA-256。GitHub自动生成的source archive
+如果任一检查失败，请勿绕过Gatekeeper。checksum仅为辅助，workflow origin须由
+attestation认证。release还会提供保留完整suffix的recursive
+`shitate-${version}-source.tar.zst`及SHA-256。GitHub自动生成的source archive
 不包含JUCE内容，因此不是对应source。
 
 ## 隐私与安全
