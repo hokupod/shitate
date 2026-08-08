@@ -93,7 +93,7 @@ jobs:
           submodules: recursive
 
       - name: Install Nix
-        uses: cachix/install-nix-action@b4b293eae0b79aac8a161bb32925a5508c9cca93 # v31
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31
 
       - name: Build and test before release authority
         run: |
@@ -131,7 +131,7 @@ jobs:
           submodules: recursive
 
       - name: Install Nix
-        uses: cachix/install-nix-action@b4b293eae0b79aac8a161bb32925a5508c9cca93 # v31
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31
 
       - name: Initialize empty release artifact directory
         run: |
