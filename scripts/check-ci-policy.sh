@@ -91,6 +91,68 @@ for workflow in "${workflow_files[@]}"; do
   done <<<"$secret_jobs"
 done
 
+codeql_workflow="$workflow_directory/codeql.yml"
+if [[ ! -f "$codeql_workflow" ]] ||
+  ! yq -o=json '.' "$codeql_workflow" | jq -e '
+    (.on | keys | sort == ["push", "schedule", "workflow_dispatch"]) and
+    (.on.push == {"branches":["main"]}) and
+    (.on.schedule == [{"cron":"17 19 * * 2"}]) and
+    (.concurrency.group == "codeql-${{ github.ref }}") and
+    (.concurrency["cancel-in-progress"] == false) and
+    (.jobs.gate["runs-on"] == "ubuntu-24.04") and
+    (.jobs.gate.permissions == {
+      "contents":"read",
+      "security-events":"read"
+    }) and
+    (.jobs.gate.outputs.analyze == "${{ steps.decision.outputs.analyze }}") and
+    (.jobs.gate.steps | map(select(.id == "decision")) | length == 1) and
+    ((.jobs.gate.steps[] | select(.id == "decision") |
+      .env.ANALYSIS_PATHS_JSON | fromjson) == [
+      ".github/codeql",
+      ".github/workflows/codeql.yml",
+      ".gitmodules",
+      "CMakeLists.txt",
+      "CMakePresets.json",
+      "Sources",
+      "cmake",
+      "external/JUCE",
+      "flake.lock",
+      "flake.nix",
+      "scripts/bootstrap.sh",
+      "scripts/build.sh",
+      "scripts/configure.sh"
+    ]) and
+    ((.jobs.gate.steps[] | select(.id == "decision") |
+      .env.ANALYSIS_ENVIRONMENT) == "{}") and
+    ((.jobs.gate.steps[] | select(.id == "decision") |
+      .env.MAX_ANALYSIS_AGE_SECONDS) == "1814400") and
+    (.jobs.analyze.needs == "gate") and
+    (.jobs.analyze["if"] == "${{ always() && !cancelled() && (needs.gate.result != \u0027success\u0027 || needs.gate.outputs.analyze == \u0027true\u0027) }}")
+  ' >/dev/null; then
+  printf 'CodeQL workflow must use guarded main-push, weekly, and manual triggers\n' >&2
+  exit 1
+fi
+for required_text in \
+  "if ! analyses=\$(gh api \"\$analyses_url\"); then" \
+  ".analysis_key == \$analysis_key" \
+  "and .category == \$analysis_key" \
+  "and .environment == \$analysis_environment" \
+  'and .error == ""' \
+  'and .warning == ""' \
+  'and .rules_count > 0' \
+  'MAX_ANALYSIS_AGE_SECONDS: "1814400"' \
+  "if: github.event_name != 'workflow_dispatch'" \
+  'GITHUB_EVENT_NAME" == workflow_dispatch' \
+  'git merge-base --is-ancestor' \
+  'mapfile -t analysis_paths' \
+  'git diff --quiet' \
+  'running fail-open'; do
+  if ! grep -Fq -- "$required_text" "$codeql_workflow"; then
+    printf 'CodeQL workflow gate is missing: %s\n' "$required_text" >&2
+    exit 1
+  fi
+done
+
 release_workflow="$workflow_directory/release.yml"
 if [[ ! -f "$release_workflow" ]]; then
   printf 'release workflow is missing\n' >&2

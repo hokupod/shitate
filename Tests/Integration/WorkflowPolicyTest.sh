@@ -143,6 +143,39 @@ printf '\npull_request_target:\n' >>"$test_root/.github/workflows/ci.yml"
 expect_rejection pull-request-target
 
 reset_fixture
+yq -i 'del(.on.schedule)' "$test_root/.github/workflows/codeql.yml"
+expect_rejection codeql-without-weekly-gate
+
+reset_fixture
+yq -i '.concurrency."cancel-in-progress" = true' \
+  "$test_root/.github/workflows/codeql.yml"
+expect_rejection codeql-cancels-in-progress
+
+reset_fixture
+yq -i '.jobs.analyze.if = "needs.gate.outputs.analyze"' \
+  "$test_root/.github/workflows/codeql.yml"
+expect_rejection codeql-without-gate-failure-fallback
+
+reset_fixture
+perl -0pi -e 's/needs\.gate\.result != \x27success\x27 \|\| needs\.gate\.outputs\.analyze/needs.gate.result != \x27success\x27 && needs.gate.outputs.analyze/' \
+  "$test_root/.github/workflows/codeql.yml"
+expect_rejection codeql-with-broken-gate-failure-fallback
+
+reset_fixture
+perl -0pi -e 's/\n              "Sources",//' \
+  "$test_root/.github/workflows/codeql.yml"
+expect_rejection codeql-without-source-trigger
+
+reset_fixture
+yq -i '(.jobs.gate.steps[] | select(.id == "decision").env.ANALYSIS_ENVIRONMENT) = "{\"language\":\"swift\"}"' \
+  "$test_root/.github/workflows/codeql.yml"
+expect_rejection codeql-without-combined-language-record
+
+reset_fixture
+perl -pi -e 's/1814400/2419200/' "$test_root/.github/workflows/codeql.yml"
+expect_rejection codeql-without-28-day-scan-bound
+
+reset_fixture
 perl -0pi -e 's/(      - name: Verify toolchain and dependency pins\n)/$1        env:\n          UNTRUSTED: \${{ secrets.UNTRUSTED_PR_SECRET }}\n/' \
   "$test_root/.github/workflows/ci.yml"
 expect_rejection pr-secret

@@ -4,16 +4,148 @@
 name: CodeQL
 
 on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "17 19 * * 2"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
 jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: read
+    outputs:
+      analyze: ${{ steps.decision.outputs.analyze }}
+    steps:
+      - name: Check out history for change detection
+        if: github.event_name != 'workflow_dispatch'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Decide whether analysis is required
+        id: decision
+        env:
+          # The non-matrix analyze job combines every configured language into
+          # one upload. This value rejects any future per-language layout.
+          ANALYSIS_ENVIRONMENT: "{}"
+          ANALYSIS_KEY: .github/workflows/codeql.yml:analyze
+          ANALYSIS_PATHS_JSON: >-
+            [
+              ".github/codeql",
+              ".github/workflows/codeql.yml",
+              ".gitmodules",
+              "CMakeLists.txt",
+              "CMakePresets.json",
+              "Sources",
+              "cmake",
+              "external/JUCE",
+              "flake.lock",
+              "flake.nix",
+              "scripts/bootstrap.sh",
+              "scripts/build.sh",
+              "scripts/configure.sh"
+            ]
+          GH_TOKEN: ${{ github.token }}
+          MAX_ANALYSIS_AGE_SECONDS: "1814400"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          run_analysis() {
+            printf 'analyze=true\n' >>"$GITHUB_OUTPUT"
+            printf '%s\n' "$1"
+            exit 0
+          }
+
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            run_analysis "CodeQL analysis requested manually."
+          fi
+
+          analyses_url="repos/$GITHUB_REPOSITORY/code-scanning/analyses?ref=refs%2Fheads%2Fmain&tool_name=CodeQL&sort=created&direction=desc&per_page=100"
+          if ! analyses=$(gh api "$analyses_url"); then
+            run_analysis "Could not read prior CodeQL analyses; running fail-open."
+          fi
+
+          if ! analysis=$(jq -c \
+            --arg analysis_environment "$ANALYSIS_ENVIRONMENT" \
+            --arg analysis_key "$ANALYSIS_KEY" '
+              [
+                .[]
+                | select(
+                    .analysis_key == $analysis_key
+                    and .category == $analysis_key
+                    and .environment == $analysis_environment
+                    and .ref == "refs/heads/main"
+                    and .tool.name == "CodeQL"
+                    and .error == ""
+                    and .warning == ""
+                    and .rules_count > 0
+                  )
+              ][0] // empty
+            ' <<<"$analyses"); then
+            run_analysis "Could not parse prior CodeQL analyses; running fail-open."
+          fi
+          if [[ -z "$analysis" ]]; then
+            run_analysis "No successful main CodeQL analysis exists."
+          fi
+
+          if ! baseline=$(jq -er '.commit_sha' <<<"$analysis") ||
+            [[ ! "$baseline" =~ ^[0-9a-f]{40}$ ]]; then
+            run_analysis "The prior analysis commit is invalid; running fail-open."
+          fi
+          if ! created_at=$(jq -er '.created_at' <<<"$analysis"); then
+            run_analysis "The prior analysis time is invalid; running fail-open."
+          fi
+          if ! baseline_epoch=$(date -u -d "$created_at" +%s 2>/dev/null); then
+            run_analysis "Could not parse the prior analysis time; running fail-open."
+          fi
+          current_epoch=$(date -u +%s)
+          if ((current_epoch - baseline_epoch >= MAX_ANALYSIS_AGE_SECONDS)); then
+            run_analysis "The last successful analysis is at least 21 days old."
+          fi
+
+          if ! git cat-file -e "${baseline}^{commit}" 2>/dev/null ||
+            ! git merge-base --is-ancestor "$baseline" "$GITHUB_SHA"; then
+            run_analysis "The prior analysis commit is unavailable or unrelated."
+          fi
+
+          if ! analysis_paths_text=$(jq -er '
+              if type == "array"
+                and length > 0
+                and all(.[]; type == "string" and length > 0)
+              then .[]
+              else error("invalid analysis paths")
+              end
+            ' <<<"$ANALYSIS_PATHS_JSON"); then
+            run_analysis "Could not parse CodeQL-relevant paths; running fail-open."
+          fi
+          mapfile -t analysis_paths <<<"$analysis_paths_text"
+          if git diff --quiet "$baseline" "$GITHUB_SHA" -- "${analysis_paths[@]}"; then
+            printf 'analyze=false\n' >>"$GITHUB_OUTPUT"
+            printf 'No unscanned CodeQL-relevant changes found.\n'
+            exit 0
+          fi
+          run_analysis "Unscanned CodeQL-relevant changes found."
+
   analyze:
+    needs: gate
+    if: ${{ always() && !cancelled() && (needs.gate.result != 'success' || needs.gate.outputs.analyze == 'true') }}
     runs-on: macos-26
     permissions:
       contents: read
