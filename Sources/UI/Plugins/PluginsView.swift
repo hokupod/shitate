@@ -45,8 +45,8 @@ struct PluginsView: View {
             presenting: pendingAdHocApproval
         ) { entry in
             Button("Cancel", role: .cancel) {}
-            Button("Approve & Add") {
-                model.approveAdHocPluginAndAdd(entry)
+            Button(model.canAddPlugin ? "Approve & Add" : "Approve") {
+                model.approveAdHocPlugin(entry)
             }
         } message: { _ in
             Text(
@@ -143,10 +143,10 @@ struct PluginsView: View {
                             }
                             .disabled(!model.canAddPlugin)
                         case .approve:
-                            Button("Approve & Add…") {
+                            Button(model.canAddPlugin ? "Approve & Add…" : "Approve…") {
                                 pendingAdHocApproval = entry
                             }
-                            .disabled(!model.canAddPlugin)
+                            .disabled(!model.canApproveAdHocPlugin)
                         case .reviewSettings:
                             SettingsLink {
                                 Text("Settings…")

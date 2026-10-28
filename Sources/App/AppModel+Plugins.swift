@@ -102,8 +102,8 @@ extension AppModel {
         requestAudioOperation(.addPlugin(entry.fingerprint))
     }
 
-    func approveAdHocPluginAndAdd(_ entry: PluginCatalogEntry) {
-        guard canAddPlugin else {
+    func approveAdHocPlugin(_ entry: PluginCatalogEntry) {
+        guard canApproveAdHocPlugin else {
             return
         }
         guard
@@ -136,7 +136,9 @@ extension AppModel {
             }
             approvedAdHocFingerprints.insert(entry.fingerprint)
             pluginCatalogError = nil
-            requestAudioOperation(.addPlugin(entry.fingerprint))
+            if canAddPlugin {
+                requestAudioOperation(.addPlugin(entry.fingerprint))
+            }
         } catch {
             approvedAdHocFingerprints.remove(entry.fingerprint)
             pluginCatalogError =

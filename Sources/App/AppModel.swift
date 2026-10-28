@@ -358,6 +358,10 @@ final class AppModel: NSObject, STAudioEngineBridgeDelegate {
         canEditPluginChain && pluginSlots.count < SessionDocument.maximumSlots
     }
 
+    var canApproveAdHocPlugin: Bool {
+        canEditPluginChain || canRecoverSession
+    }
+
     var canRecoverSession: Bool {
         if case .incomplete = sessionWorkflow {
             return loadedSession != nil

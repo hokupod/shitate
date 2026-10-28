@@ -5,6 +5,127 @@ import XCTest
 
 final class AppModelWorkflowTests: XCTestCase {
     @MainActor
+    func testIncompleteRestoreAllowsApprovalWhileKeepingChainEditsDisabled() throws {
+        let fixture = try AppModelFixture()
+        defer { fixture.remove() }
+        let model = fixture.makeModel()
+        model.loadedSession = PersistedSession(document: .emptyDefault, pluginStates: [:])
+        model.sessionWorkflow = .incomplete("A saved plug-in requires approval.")
+
+        XCTAssertTrue(model.canApproveAdHocPlugin)
+        XCTAssertFalse(model.canAddPlugin)
+        XCTAssertFalse(model.canEditPluginChain)
+
+        model.isPluginOperationInFlight = true
+        XCTAssertFalse(model.canApproveAdHocPlugin)
+        model.isPluginOperationInFlight = false
+        model.pendingAudioOperation = .retrySessionRestore
+        XCTAssertFalse(model.canApproveAdHocPlugin)
+        model.pendingAudioOperation = nil
+        model.operationAfterStop = .retrySessionRestore
+        XCTAssertFalse(model.canApproveAdHocPlugin)
+        model.operationAfterStop = nil
+
+        for state in [ApplicationState.starting, .stopping] {
+            model.state = state
+            XCTAssertFalse(model.canApproveAdHocPlugin)
+        }
+        model.state = .readyStopped
+        for workflow in [
+            SessionWorkflowState.notLoaded, .restoreSkipped, .restoring, .saving,
+        ] {
+            model.sessionWorkflow = workflow
+            XCTAssertFalse(model.canApproveAdHocPlugin)
+        }
+        model.sessionWorkflow = .incomplete("No saved session.")
+        model.loadedSession = nil
+        XCTAssertFalse(model.canApproveAdHocPlugin)
+    }
+
+    @MainActor
+    func testFullChainAllowsApprovalWithoutAddingAnotherSlot() throws {
+        let fixture = try AppModelFixture()
+        defer { fixture.remove() }
+        let model = fixture.makeModel()
+        model.sessionWorkflow = .complete
+        model.pluginSlots = (0..<SessionDocument.maximumSlots).map { index in
+            PluginSlotPresentation(
+                id: UUID(), fingerprint: "plugin-\(index)", name: "Plug-in \(index)",
+                manufacturer: "Tests", version: "1.0", isBypassed: false,
+                isFaulted: false, latencySamples: 0, hasEditor: false
+            )
+        }
+
+        XCTAssertTrue(model.canApproveAdHocPlugin)
+        XCTAssertFalse(model.canAddPlugin)
+    }
+
+    @MainActor
+    func testApprovalRevalidatesExactFingerprintWithoutChangingIncompleteSession() throws {
+        let fixture = try AppModelFixture()
+        defer { fixture.remove() }
+        let pluginBridge = EmptyApprovalScanBridge()
+        let model = fixture.makeModel(pluginBridge: pluginBridge)
+        let entry = approvalRequiredEntry()
+        let slotID = UUID()
+        let original = PersistedSession(
+            document: SessionDocument(
+                schemaVersion: 1, id: "default", name: "Saved",
+                updatedAt: "2026-08-07T00:00:00Z",
+                slots: [
+                    SessionSlotDocument(
+                        slotID: slotID, order: 0, pluginFingerprint: entry.fingerprint,
+                        bundlePath: entry.bundlePath, classUID: entry.classUID,
+                        name: entry.name, manufacturer: entry.manufacturer, version: entry.version,
+                        bypassed: true, stateFile: SessionSlotDocument.stateFile(for: slotID)
+                    )
+                ]
+            ),
+            pluginStates: [slotID: Data([1, 2, 3])]
+        )
+        try model.sessionStore.save(original)
+        model.settings.pluginPolicy.allowAdHocSignedPlugins = true
+        try model.settingsStore.save(model.settings)
+        let originalSettings = model.settings
+        model.restoreSavedSession()
+        let workflow = model.sessionWorkflow
+        XCTAssertTrue(model.canRecoverSession)
+
+        model.approveAdHocPlugin(entry)
+
+        XCTAssertEqual(pluginBridge.scannedPaths, [entry.bundlePath])
+        XCTAssertEqual(pluginBridge.requestedApprovals, [entry.fingerprint])
+        XCTAssertTrue(model.approvedAdHocFingerprints.isEmpty)
+        XCTAssertNotNil(model.pluginCatalogError)
+        XCTAssertEqual(model.sessionWorkflow, workflow)
+        XCTAssertEqual(model.loadedSession, original)
+        XCTAssertEqual(try model.sessionStore.load(id: "default"), original)
+        XCTAssertEqual(try model.settingsStore.load(), originalSettings)
+        XCTAssertTrue(model.pluginSlots.isEmpty)
+        XCTAssertFalse(model.isRoutingActive)
+    }
+
+    private func approvalRequiredEntry() -> PluginCatalogEntry {
+        let bundlePath = "/Library/Audio/Plug-Ins/VST3/ApprovalFixture.vst3"
+        let classUID = String(repeating: "a", count: 32)
+        let codeDirectoryHash = String(repeating: "b", count: 40)
+        return PluginCatalogEntry(
+            fingerprint: PluginCatalogFingerprint.make(
+                bundlePath: bundlePath, classUID: classUID,
+                codeDirectoryHash: codeDirectoryHash, architecture: "arm64"
+            )!,
+            bundlePath: bundlePath, classUID: classUID, name: "Approval Fixture",
+            manufacturer: "Tests", version: "1.0", codeDirectoryHash: codeDirectoryHash,
+            teamIdentifier: "", signatureKind: .adHoc, architectures: ["arm64"],
+            inputChannels: 2, outputChannels: 2, latencySamples: 0, hasEditor: false,
+            compatibility: .blocked, reason: PluginCatalogEntry.adHocApprovalRequiredReason,
+            bundleModificationTime: 100, scannerProtocol: 1,
+            compatibleAppVersion: PluginCatalogDocument.currentCompatibleAppVersion,
+            lastScannedAt: "2026-08-07T00:00:00Z"
+        )
+    }
+
+    @MainActor
     func testFreshModelRestoresACompleteZeroPluginSession() throws {
         let fixture = try AppModelFixture()
         defer { fixture.remove() }
@@ -388,8 +509,12 @@ private final class AppModelFixture {
         )
     }
 
-    func makeModel(bridge: STAudioEngineBridge = STAudioEngineBridge()) -> AppModel {
+    func makeModel(
+        bridge: STAudioEngineBridge = STAudioEngineBridge(),
+        pluginBridge: STPluginBridge = STPluginBridge()
+    ) -> AppModel {
         let catalog = PluginCatalogService(
+            bridge: pluginBridge,
             store: PluginCatalogStore(fileURL: root.appendingPathComponent("catalog.json"))
         )
         return AppModel(
@@ -410,6 +535,20 @@ private final class AppModelFixture {
 
     nonisolated func remove() {
         try? FileManager.default.removeItem(at: root)
+    }
+}
+
+private final class EmptyApprovalScanBridge: STPluginBridge {
+    private(set) var scannedPaths: [String] = []
+    private(set) var requestedApprovals = Set<String>()
+
+    override func rescanBundle(
+        atPath bundlePath: String,
+        approvedAdHocFingerprints: Set<String>
+    ) throws -> [STPluginDescriptor] {
+        scannedPaths.append(bundlePath)
+        requestedApprovals = approvedAdHocFingerprints
+        return []
     }
 }
 
